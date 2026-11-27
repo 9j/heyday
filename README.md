@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/mac-mebox.png" alt="Heyday on macOS showing Mebox and a folded conversation" width="900" />
+  <img src="docs/mac-mebox.png" alt="Heyday on macOS showing Mebox with Bubbled Up, Set Aside pile, folded conversation, and floating action dock" width="900" />
 </p>
 
 Point Heyday at any IMAP/SMTP account — iCloud, Gmail, Fastmail, or a self-hosted server. On the Mac it also includes a one-click preset for **Proton Mail Bridge**.
@@ -129,6 +129,14 @@ IMAP has folders and flags, and nothing else. The rest is this app's doing:
 
 <p align="center">
   <img src="docs/mac-screener.png" alt="The Screener on macOS showing waiting senders and one-click delivery decisions" width="900" />
+</p>
+
+<p align="center">
+  <img src="docs/mac-bubbleup.png" alt="Native SwiftUI Bubble Up scheduler popover over the floating thread action dock" width="900" />
+</p>
+
+<p align="center">
+  <img src="docs/mac-feed.png" alt="The Feed on macOS rendering newsletters as an open full-width card stream with New Since You Last Visited divider" width="900" />
 </p>
 
 The Screener only looks at mail that arrives after the account is added. Whatever the

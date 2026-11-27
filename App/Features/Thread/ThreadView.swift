@@ -420,9 +420,11 @@ private struct DockMoreMenu: View {
             .contentShape(Capsule())
         }
         #if os(macOS)
-        .menuStyle(.borderlessButton)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
         #endif
+        .tint(.primary)
         .fixedSize()
         .onHover { isHovering = $0 }
         .motion(Motion.response, value: isHovering)

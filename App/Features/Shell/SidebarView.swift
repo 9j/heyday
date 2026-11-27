@@ -85,15 +85,16 @@ struct SidebarView: View {
 
     private func row(_ listing: Listing) -> some View {
         let presentation = ListingPresentation(listing, directory: workspace.directory)
-        let itemTint: ListItemTint = if let color = HeydayTheme.sidebarTint(for: listing) {
-            .fixed(color)
-        } else {
-            .monochrome
+        let semanticTint = HeydayTheme.sidebarTint(for: listing)
+        return Label {
+            Text(presentation.title)
+        } icon: {
+            Image(systemName: presentation.symbol)
+                .foregroundStyle(semanticTint ?? .secondary)
         }
-        return Label(presentation.title, systemImage: presentation.symbol)
-            .listItemTint(itemTint)
-            .badge(workspace.badge(for: listing))
-            .tag(listing)
+        .listItemTint(semanticTint.map { .fixed($0) } ?? .monochrome)
+        .badge(workspace.badge(for: listing))
+        .tag(listing)
     }
 
     /// A mailbox as the server has it. Two can share a name (a folder and a label,

@@ -126,6 +126,7 @@ struct ConversationToolbar: ToolbarContent {
             Menu("More", systemImage: "ellipsis") {
                 ConversationMenu(workspace: workspace, conversations: conversations)
             }
+            .tint(.primary)
             .help("More actions")
             .disabled(conversations.isEmpty)
         }

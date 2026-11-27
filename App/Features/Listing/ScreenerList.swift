@@ -137,10 +137,14 @@ struct ScreenerBanner: View {
     private var answersByName: some View {
         HStack(spacing: 6) {
             Button("Screen Out", systemImage: "hand.thumbsdown") { onDecide(.screenedOut) }
+                .tint(.primary)
             Button("Paper Trail", systemImage: "scroll") { onDecide(.approved(.paperTrail)) }
+                .tint(.primary)
             Button("The Feed", systemImage: "newspaper") { onDecide(.approved(.feed)) }
+                .tint(.primary)
             Button("Yes", systemImage: "hand.thumbsup.fill") { onDecide(.approved(.mebox)) }
                 .buttonStyle(.borderedProminent)
+                .tint(HeydayTheme.rose)
                 .help("Yes: deliver their email to Mebox")
         }
         .buttonBorderShape(.capsule)
