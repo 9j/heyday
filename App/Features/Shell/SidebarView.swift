@@ -85,14 +85,15 @@ struct SidebarView: View {
 
     private func row(_ listing: Listing) -> some View {
         let presentation = ListingPresentation(listing, directory: workspace.directory)
-        return Label {
-            Text(presentation.title)
-        } icon: {
-            Image(systemName: presentation.symbol)
-                .foregroundStyle(.tint)
+        let itemTint: ListItemTint = if let color = HeydayTheme.sidebarTint(for: listing) {
+            .fixed(color)
+        } else {
+            .monochrome
         }
-        .badge(workspace.badge(for: listing))
-        .tag(listing)
+        return Label(presentation.title, systemImage: presentation.symbol)
+            .listItemTint(itemTint)
+            .badge(workspace.badge(for: listing))
+            .tag(listing)
     }
 
     /// A mailbox as the server has it. Two can share a name (a folder and a label,
@@ -177,7 +178,7 @@ private struct AccountSwitcherFooter: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.accentColor, in: Capsule())
+                        .background(HeydayTheme.rose, in: Capsule())
                         .help("\(otherAccountsUnread) unread in other accounts")
                 }
                 Image(systemName: "chevron.up.chevron.down")
@@ -273,7 +274,7 @@ private struct AccountSwitcherRow: View {
                 if isActive {
                     Image(systemName: "checkmark")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(HeydayTheme.rose)
                 }
             }
             .padding(.horizontal, 10)

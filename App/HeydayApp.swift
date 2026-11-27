@@ -11,6 +11,7 @@ struct HeydayApp: App {
             RootView(services: services)
                 .frame(minWidth: 880, minHeight: 520)
                 .presentsDraftsAndSettings(services: services)
+                .tint(HeydayTheme.rose)
         }
         .defaultSize(width: 1240, height: 780)
         .commands {
@@ -21,6 +22,7 @@ struct HeydayApp: App {
         WindowGroup("New Message", for: ComposeRequest.self) { $request in
             if let request {
                 ComposeWindow(request: request, services: services)
+                    .tint(HeydayTheme.rose)
             }
         }
         .defaultSize(width: 640, height: 560)
@@ -29,12 +31,14 @@ struct HeydayApp: App {
 
         Settings {
             SettingsView(services: services)
+                .tint(HeydayTheme.rose)
         }
         #else
         // One window: a draft and the settings are sheets over it.
         WindowGroup {
             RootView(services: services)
                 .presentsDraftsAndSettings(services: services)
+                .tint(HeydayTheme.rose)
         }
         .commands {
             // For a keyboard attached to an iPad.

@@ -17,11 +17,17 @@ struct SetAsidePile: View {
                 isExpanded.toggle()
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "pin.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(-30))
-                        .accessibilityHidden(true)
+                    ZStack {
+                        Circle()
+                            .fill(HeydayTheme.sun.opacity(0.16))
+                            .overlay(Circle().strokeBorder(HeydayTheme.sun.opacity(0.30), lineWidth: 0.75))
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(HeydayTheme.coral)
+                            .rotationEffect(.degrees(-28))
+                    }
+                    .frame(width: 24, height: 24)
+                    .accessibilityHidden(true)
 
                     pileStack(top: top, count: conversations.count)
                 }
@@ -79,16 +85,16 @@ struct SetAsidePile: View {
                 if count > 1 {
                     Text(String(count))
                         .font(.caption2.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(HeydayTheme.coral)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(.quaternary, in: Capsule())
+                        .background(HeydayTheme.sun.opacity(0.16), in: Capsule())
                 }
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
             .background(Color.textBackground, in: cardShape)
-            .overlay(cardShape.strokeBorder(.separator))
+            .overlay(cardShape.strokeBorder(isHovering ? HeydayTheme.rose.opacity(0.40) : Color.primary.opacity(0.12)))
             .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
         }
         .padding(.top, count >= 3 ? 8 : count >= 2 ? 4 : 0)
@@ -103,14 +109,19 @@ private struct SetAsidePilePopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Label("Set Aside", systemImage: "pin.fill")
-                    .font(.headline)
+                Label {
+                    Text("Set Aside")
+                } icon: {
+                    Image(systemName: "pin.fill")
+                        .foregroundStyle(HeydayTheme.coral)
+                }
+                .font(.headline)
                 Text(String(conversations.count))
                     .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(HeydayTheme.coral)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(.quaternary, in: Capsule())
+                    .background(HeydayTheme.sun.opacity(0.16), in: Capsule())
                 Spacer()
                 Button("Open List") {
                     onClose()

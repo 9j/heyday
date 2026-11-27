@@ -70,7 +70,7 @@ struct ThreadView: View {
                 Button(isTranslationShown ? "Show Original" : "Translate", systemImage: "translate", action: toggleTranslation)
                     .symbolEffect(.pulse, isActive: isTranslating)
                     // Coloured while a translation is on screen, as a switch that is on.
-                    .tint(isTranslationShown ? Color.accentColor : nil)
+                    .tint(isTranslationShown ? HeydayTheme.rose : nil)
                     .help(isTranslationShown ? "Show the messages as written (⇧⌘T)" : "Translate the open messages (⇧⌘T)")
                     .disabled(openMessages.isEmpty)
             }
@@ -298,7 +298,7 @@ private struct EarlierMessagesButton: View {
 }
 
 /// Floating action pill at the bottom of an open conversation: Reply, Reply Later,
-/// Set Aside, Bubble Up, and More — matching HEY's signature reading dock.
+/// Set Aside, Bubble Up, and More — styled natively with Heyday's Dawn accent.
 private struct ThreadActionDock: View {
     let conversation: Conversation
     let workspace: Workspace
@@ -314,32 +314,32 @@ private struct ThreadActionDock: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            dockButton("Reply", systemImage: "arrowshape.turn.up.left") {
+            DockActionButton(title: "Reply", systemImage: "arrowshape.turn.up.left") {
                 compose(.reply(to: conversation.latest.id))
             }
             .help("Reply (⌘R)")
 
-            dockButton("Reply Later", systemImage: "clock") {
+            DockActionButton(title: "Reply Later", systemImage: "clock") {
                 workspace.move([conversation], to: .appFolder(.replyLater))
             }
             .disabled(!workspace.canMove([conversation], to: .appFolder(.replyLater)))
             .help("Reply Later (⌘L)")
 
             if isInSetAside {
-                dockButton("Put Back", systemImage: "pin.slash") {
+                DockActionButton(title: "Put Back", systemImage: "pin.slash", isActive: true) {
                     workspace.move([conversation], to: .inbox)
                 }
                 .help("Return to Mebox")
             } else {
-                dockButton("Set Aside", systemImage: "pin") {
+                DockActionButton(title: "Set Aside", systemImage: "pin") {
                     workspace.move([conversation], to: .appFolder(.setAside))
                 }
                 .disabled(!workspace.canMove([conversation], to: .appFolder(.setAside)))
                 .help("Set Aside (⇧⌘S)")
             }
 
-            dockButton(
-                "Bubble Up",
+            DockActionButton(
+                title: "Bubble Up",
                 systemImage: activeBubbleUp?.condition == .ifNoReply ? "hourglass" : "bubbles.and.sparkles",
                 isActive: activeBubbleUp != nil
             ) {
@@ -352,38 +352,23 @@ private struct ThreadActionDock: View {
                 }
             }
 
-            Menu {
-                ConversationMenu(workspace: workspace, conversations: [conversation])
-            } label: {
-                VStack(spacing: 3) {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 14, weight: .medium))
-                        .frame(height: 18)
-                    Text("More")
-                        .font(.caption2.weight(.medium))
-                }
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .contentShape(Capsule())
-            }
-            #if os(macOS)
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            #endif
-            .fixedSize()
+            DockMoreMenu(conversation: conversation, workspace: workspace)
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .floatingSurface(in: Capsule())
     }
+}
 
-    private func dockButton(
-        _ title: String,
-        systemImage: String,
-        isActive: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
+private struct DockActionButton: View {
+    let title: String
+    let systemImage: String
+    var isActive = false
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
         Button(action: action) {
             VStack(spacing: 3) {
                 Image(systemName: systemImage)
@@ -392,11 +377,54 @@ private struct ThreadActionDock: View {
                 Text(title)
                     .font(.caption2.weight(.medium))
             }
-            .foregroundStyle(isActive ? Color.accentColor : Color.primary)
+            .foregroundStyle(isActive ? HeydayTheme.rose : Color.primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
+            .background(pillBackground, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.pressable)
+        .onHover { isHovering = $0 }
+        .motion(Motion.response, value: isHovering)
+    }
+
+    private var pillBackground: Color {
+        if isActive {
+            return HeydayTheme.rose.opacity(isHovering ? 0.18 : 0.12)
+        }
+        return isHovering ? Color.primary.opacity(0.07) : Color.clear
+    }
+}
+
+private struct DockMoreMenu: View {
+    let conversation: Conversation
+    let workspace: Workspace
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Menu {
+            ConversationMenu(workspace: workspace, conversations: [conversation])
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(height: 18)
+                Text("More")
+                    .font(.caption2.weight(.medium))
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(isHovering ? Color.primary.opacity(0.07) : Color.clear, in: Capsule())
+            .contentShape(Capsule())
+        }
+        #if os(macOS)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        #endif
+        .fixedSize()
+        .onHover { isHovering = $0 }
+        .motion(Motion.response, value: isHovering)
     }
 }

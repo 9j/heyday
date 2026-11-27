@@ -124,7 +124,7 @@ struct ConversationList<Footer: View>: View {
             .swipeActions(edge: .trailing) {
                 if workspace.canMove([conversation], to: .role(.archive)) {
                     Button("Archive", systemImage: "archivebox") { workspace.move([conversation], to: .role(.archive)) }
-                        .tint(.purple)
+                        .tint(HeydayTheme.violet)
                 }
                 if workspace.canMove([conversation], to: .role(.trash)) {
                     Button("Trash", systemImage: "trash") { workspace.move([conversation], to: .role(.trash)) }
@@ -135,14 +135,14 @@ struct ConversationList<Footer: View>: View {
                 Button(conversation.isSeen ? "Unseen" : "Seen", systemImage: conversation.isSeen ? "envelope.badge" : "envelope.open") {
                     workspace.setSeen(!conversation.isSeen, [conversation])
                 }
-                .tint(.blue)
+                .tint(HeydayTheme.rose)
                 if workspace.canMove([conversation], to: .appFolder(.replyLater)) {
                     Button("Reply Later", systemImage: "clock") { workspace.move([conversation], to: .appFolder(.replyLater)) }
-                        .tint(.orange)
+                        .tint(HeydayTheme.coral)
                 }
                 if workspace.canMove([conversation], to: .appFolder(.setAside)) {
                     Button("Set Aside", systemImage: "pin") { workspace.move([conversation], to: .appFolder(.setAside)) }
-                        .tint(.teal)
+                        .tint(HeydayTheme.sun)
                 }
             }
         }
@@ -169,16 +169,20 @@ private struct SectionTitle: View {
     }
 }
 
-/// Marks the BUBBLED UP section at the top of Mebox with a crisp accent rule.
+/// Marks the BUBBLED UP section at the top of Mebox with Heyday's Dawn horizon rule.
 private struct BubbledUpSectionHeader: View {
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
+            Image(systemName: "sun.horizon.fill")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(HeydayTheme.rose)
+                .accessibilityHidden(true)
             Text("BUBBLED UP")
                 .font(.caption.weight(.bold))
                 .tracking(0.7)
-                .foregroundStyle(.primary)
-            Rectangle()
-                .fill(Color.accentColor.opacity(0.55))
+                .foregroundStyle(HeydayTheme.rose)
+            Capsule()
+                .fill(HeydayTheme.horizonGradient.opacity(0.65))
                 .frame(height: 1.5)
         }
         .padding(.top, 8)
@@ -194,13 +198,13 @@ struct NewSinceLastVisitedDivider: View {
     var body: some View {
         HStack(spacing: 8) {
             SquiggleWave()
-                .stroke(Color.accentColor.opacity(0.75), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                .stroke(HeydayTheme.horizonGradient, style: StrokeStyle(lineWidth: 1.75, lineCap: .round, lineJoin: .round))
                 .frame(width: 48, height: 6)
                 .accessibilityHidden(true)
             Text("NEW SINCE YOU LAST VISITED")
                 .font(.caption2.weight(.semibold))
                 .tracking(0.6)
-                .foregroundStyle(Color.accentColor.opacity(0.9))
+                .foregroundStyle(HeydayTheme.rose)
             Spacer(minLength: 0)
         }
         .padding(.vertical, 6)
@@ -381,13 +385,17 @@ struct ConversationRow: View {
                         }
                         if !isBubbledUp {
                             if let scheduled = scheduledBubbleUp {
+                                let chipTint = scheduled.condition == .ifNoReply ? HeydayTheme.coral : HeydayTheme.rose
                                 HStack(spacing: 3) {
                                     Image(systemName: scheduled.condition == .ifNoReply ? "hourglass" : "bubbles.and.sparkles")
-                                        .font(.caption2)
+                                        .font(.caption2.weight(.semibold))
                                     Text(BubbleUpSchedule.shortLabel(for: scheduled.dueAt, now: .now, calendar: .current, locale: .current))
-                                        .font(.caption)
+                                        .font(.caption2.weight(.semibold))
                                 }
-                                .foregroundStyle(Color.accentColor)
+                                .foregroundStyle(chipTint)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(chipTint.opacity(0.12), in: Capsule())
                                 .help("Bubbles up \(scheduled.dueAt.formatted(date: .abbreviated, time: .shortened))")
                             } else if let date = conversation.latest.date {
                                 Text(ThreadTimestamp.text(for: date, now: .now, calendar: .current, locale: .current))
@@ -449,7 +457,7 @@ struct ConversationRow: View {
     }
 }
 
-/// Clickable glossy blue bubble on a row in BUBBLED UP; clicking pops/dismisses it.
+/// Clickable Dawn sunrise orb on a row in BUBBLED UP; clicking pops/dismisses it.
 private struct BubbleBadgeButton: View {
     let action: () -> Void
     @State private var isHovering = false
@@ -458,19 +466,14 @@ private struct BubbleBadgeButton: View {
         Button(action: action) {
             ZStack {
                 Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(red: 0.12, green: 0.56, blue: 0.98), Color(red: 0.08, green: 0.39, blue: 0.92)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .fill(HeydayTheme.sunOrbGradient)
                 Circle()
                     .trim(from: 0.56, to: 0.72)
-                    .stroke(.white.opacity(0.85), style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                    .stroke(.white.opacity(0.88), style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
                     .padding(3)
             }
             .frame(width: 16, height: 16)
+            .shadow(color: HeydayTheme.rose.opacity(0.32), radius: 3, y: 1)
             .scaleEffect(isHovering ? 1.15 : 1)
             .motion(Motion.response, value: isHovering)
             .padding(2)

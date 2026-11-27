@@ -89,7 +89,7 @@ struct ConversationToolbar: ToolbarContent {
             Button("Bubble Up", systemImage: "bubbles.and.sparkles") {
                 showsBubbleUp = true
             }
-            .tint(hasBubbleUp ? Color.accentColor : nil)
+            .tint(hasBubbleUp ? HeydayTheme.rose : nil)
             .help("Bubble Up (⇧⌘B)")
             .disabled(single == nil)
             .popover(isPresented: $showsBubbleUp, arrowEdge: .bottom) {

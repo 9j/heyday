@@ -18,7 +18,7 @@ struct ScreenerList<Footer: View>: View {
                     .contextMenu { DeliveryChoices(sender: entry.sender, workspace: workspace) }
                     .swipeActions(edge: .leading) {
                         Button("Yes", systemImage: "hand.thumbsup.fill") { workspace.decide(.approved(.mebox), for: entry.sender) }
-                            .tint(.green)
+                            .tint(HeydayTheme.rose)
                     }
                     .swipeActions(edge: .trailing) {
                         Button("No", systemImage: "hand.thumbsdown.fill") { workspace.decide(.screenedOut, for: entry.sender) }

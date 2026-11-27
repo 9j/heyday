@@ -58,11 +58,19 @@ struct AccountSetupView: View {
 
                 autoconfigStatusRow
             } header: {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Add Your Mail Account")
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .textCase(nil)
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        HeydayAppMark(size: 46)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Add Your Mail Account")
+                                .font(.title2.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text("Connect via OAuth 2.0 or an App Password")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .textCase(nil)
                     providerQuickBar
                 }
                 .padding(.bottom, 8)
@@ -180,10 +188,14 @@ struct AccountSetupView: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
                             .background(
-                                isSelected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.06),
+                                isSelected ? HeydayTheme.rose.opacity(0.15) : Color.primary.opacity(0.06),
                                 in: Capsule()
                             )
-                            .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(isSelected ? HeydayTheme.rose.opacity(0.35) : Color.clear, lineWidth: 0.75)
+                            )
+                            .foregroundStyle(isSelected ? HeydayTheme.rose : Color.primary)
                     }
                     .buttonStyle(.plain)
                 }

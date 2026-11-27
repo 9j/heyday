@@ -164,7 +164,7 @@ private struct AccountSettings: View {
                                     if candidate.id == slot.id {
                                         Image(systemName: "checkmark")
                                             .font(.caption.weight(.semibold))
-                                            .foregroundStyle(Color.accentColor)
+                                            .foregroundStyle(HeydayTheme.rose)
                                     }
                                 }
                                 .contentShape(Rectangle())

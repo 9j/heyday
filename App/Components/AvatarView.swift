@@ -33,5 +33,14 @@ struct AvatarView: View {
         return Self.colors[sum % Self.colors.count]
     }
 
-    private static let colors: [Color] = [.blue, .purple, .pink, .orange, .teal, .green, .indigo, .brown]
+    private static let colors: [Color] = [
+        HeydayTheme.rose,
+        HeydayTheme.violet,
+        HeydayTheme.coral,
+        HeydayTheme.sun,
+        Color(red: 0.24, green: 0.56, blue: 0.88),
+        Color(red: 0.16, green: 0.64, blue: 0.60),
+        Color(red: 0.34, green: 0.66, blue: 0.40),
+        Color(red: 0.62, green: 0.42, blue: 0.56),
+    ]
 }

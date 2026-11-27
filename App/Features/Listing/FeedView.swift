@@ -47,10 +47,10 @@ private struct FeedHeader: View {
     var body: some View {
         VStack(spacing: 6) {
             HStack(spacing: 14) {
-                hairline
+                hairline(reversed: true)
                 Text("The Feed")
                     .font(.title2.weight(.bold))
-                hairline
+                hairline(reversed: false)
             }
             Text("Your newsfeed for newsletters. New stuff at the top, older stuff flows down.")
                 .font(.subheadline)
@@ -62,10 +62,16 @@ private struct FeedHeader: View {
         .accessibilityAddTraits(.isHeader)
     }
 
-    private var hairline: some View {
-        Rectangle()
-            .fill(.separator)
-            .frame(height: 1)
+    private func hairline(reversed: Bool) -> some View {
+        LinearGradient(
+            colors: reversed
+                ? [HeydayTheme.violet.opacity(0.08), HeydayTheme.rose.opacity(0.55), HeydayTheme.coral.opacity(0.55)]
+                : [HeydayTheme.coral.opacity(0.55), HeydayTheme.rose.opacity(0.55), HeydayTheme.violet.opacity(0.08)],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+        .frame(height: 1.5)
+        .clipShape(Capsule())
     }
 }
 
@@ -352,7 +358,7 @@ private struct FeedCard: View {
                         Image(systemName: "translate")
                     }
                     .buttonStyle(.borderless)
-                    .foregroundStyle(messageTranslation?.isShown == true ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(messageTranslation?.isShown == true ? HeydayTheme.rose : Color.secondary)
                     .help(messageTranslation?.isShown == true ? "Show Original" : "Translate")
                 }
 
