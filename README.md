@@ -41,13 +41,28 @@ Point Heyday at any IMAP/SMTP account — iCloud, Gmail, Fastmail, or a self-hos
 
 ---
 
-## Run it
+## Install
+
+### macOS (DMG)
+
+Download the latest Universal `.dmg` (`Apple Silicon` + `Intel`, macOS 15+) from [GitHub Releases](https://github.com/9j/heyday/releases/latest), open it, and drag **Heyday** into **Applications**.
+
+Because the release build is signed ad hoc (not Apple-notarized), macOS Gatekeeper blocks downloaded copies on first launch ("app is damaged"). Clear the quarantine attribute once in Terminal, then open Heyday normally:
+
+```sh
+xattr -cr /Applications/Heyday.app
+```
+
+### Build from source
 
 Requires Xcode 27 and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ```sh
 xcodegen generate
 open Heyday.xcodeproj   # then Run
+
+# Package a Universal macOS DMG locally:
+Tools/make-dmg.sh
 ```
 
 The first launch asks for your account: address, password, and the IMAP and SMTP
