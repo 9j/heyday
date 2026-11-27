@@ -108,7 +108,7 @@ directly.
 <p align="center">
   <img src="docs/iphone-sidebar.png" alt="Heyday on iPhone showing the mailbox sidebar with Mebox, The Feed, Paper Trail, and The Screener" width="290" />
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="docs/iphone-mebox.png" alt="Heyday on iPhone showing Mebox with New for You and Previously Seen sections" width="290" />
+  <img src="docs/iphone-mebox.png" alt="Heyday on iPhone showing Mebox with Bubbled Up, New for You, Previously Seen, and Set Aside pile" width="290" />
 </p>
 
 ---

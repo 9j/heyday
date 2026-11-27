@@ -135,6 +135,7 @@ struct MailboxList: View {
             .overlay(alignment: .bottom) {
                 if listing == .box(.mebox) {
                     SetAsidePile(workspace: workspace)
+                        .padding(.horizontal, 16)
                         .padding(.bottom, setAsidePileClearance)
                 }
             }
@@ -145,7 +146,9 @@ struct MailboxList: View {
         #if os(macOS)
         14
         #else
-        widthClass == .compact ? 62 : 14
+        // Inside NavigationSplitView's content column, the bottom safe area already
+        // clears the iOS 26 bottom search/compose bar; keep a tight floating gap above it.
+        widthClass == .compact ? 10 : 14
         #endif
     }
 

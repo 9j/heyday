@@ -50,54 +50,53 @@ struct SetAsidePile: View {
 
     private func pileStack(top: Conversation, count: Int) -> some View {
         let cardShape = RoundedRectangle(cornerRadius: 12, style: .continuous)
-        return ZStack(alignment: .bottom) {
-            if count >= 3 {
-                cardShape
-                    .fill(Color.textBackground.opacity(0.75))
-                    .overlay(cardShape.strokeBorder(.separator.opacity(0.6)))
-                    .frame(height: 44)
-                    .padding(.horizontal, 12)
-                    .offset(y: -8)
+        return HStack(spacing: 9) {
+            AvatarView(address: top.latest.from, size: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(top.subject.isEmpty ? "(No Subject)" : top.subject)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(top.latest.from?.address ?? top.latest.from?.displayName ?? "")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
+            .frame(maxWidth: 168, alignment: .leading)
+
+            if count > 1 {
+                Text(String(count))
+                    .font(.caption2.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(HeydayTheme.coral)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(HeydayTheme.sun.opacity(0.16), in: Capsule())
+            }
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .background(Color.textBackground, in: cardShape)
+        .overlay(cardShape.strokeBorder(isHovering ? HeydayTheme.rose.opacity(0.40) : Color.primary.opacity(0.12)))
+        .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
+        .background(alignment: .bottom) {
             if count >= 2 {
                 cardShape
-                    .fill(Color.textBackground.opacity(0.9))
+                    .fill(Color.textBackground.opacity(0.92))
                     .overlay(cardShape.strokeBorder(.separator.opacity(0.75)))
-                    .frame(height: 46)
                     .padding(.horizontal, 6)
-                    .offset(y: -4)
+                    .offset(y: -5)
             }
-
-            HStack(spacing: 9) {
-                AvatarView(address: top.latest.from, size: 26)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(top.subject.isEmpty ? "(No Subject)" : top.subject)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    Text(top.latest.from?.address ?? top.latest.from?.displayName ?? "")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: 168, alignment: .leading)
-
-                if count > 1 {
-                    Text(String(count))
-                        .font(.caption2.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(HeydayTheme.coral)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(HeydayTheme.sun.opacity(0.16), in: Capsule())
-                }
-            }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 8)
-            .background(Color.textBackground, in: cardShape)
-            .overlay(cardShape.strokeBorder(isHovering ? HeydayTheme.rose.opacity(0.40) : Color.primary.opacity(0.12)))
-            .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
         }
-        .padding(.top, count >= 3 ? 8 : count >= 2 ? 4 : 0)
+        .background(alignment: .bottom) {
+            if count >= 3 {
+                cardShape
+                    .fill(Color.textBackground.opacity(0.8))
+                    .overlay(cardShape.strokeBorder(.separator.opacity(0.6)))
+                    .padding(.horizontal, 12)
+                    .offset(y: -10)
+            }
+        }
+        .padding(.top, count >= 3 ? 10 : count >= 2 ? 5 : 0)
     }
 }
 
