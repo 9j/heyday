@@ -11,13 +11,15 @@ public enum MailAction: Equatable, Sendable {
     ///     does that to whatever of theirs was unread; taking the answer back makes it
     ///     unread again.
     case senderDecided(EmailAddress, SenderDecision, previously: SenderDecision?, markedRead: [MessageSummary.ID])
+    /// A conversation's Bubble Up schedule was set, changed, or dismissed.
+    case bubbleUpChanged(Conversation.ID, subject: String, BubbleUp?, previously: BubbleUp?)
 
     /// Whether everything needed to take it back is known. Moved mail is found
     /// again by its Message-ID, and the odd message has none.
     public var canBeTakenBack: Bool {
         switch self {
         case .moved(let messages, _): !messages.isEmpty && messages.allSatisfy { $0.messageID != nil }
-        case .senderDecided: true
+        case .senderDecided, .bubbleUpChanged: true
         }
     }
 }

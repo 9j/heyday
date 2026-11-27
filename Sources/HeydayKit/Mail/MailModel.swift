@@ -1,7 +1,7 @@
 import Foundation
 
 /// An email account: who you are and where your mail lives.
-public struct MailAccount: Codable, Equatable, Sendable {
+public struct MailAccount: Identifiable, Codable, Equatable, Sendable {
     public var sender: EmailAddress
     public var username: String
     public var imap: ServerEndpoint
@@ -9,13 +9,43 @@ public struct MailAccount: Codable, Equatable, Sendable {
     /// Proton Mail Bridge and Gmail file what you send into Sent themselves. Servers
     /// that do not need the client to put a copy there.
     public var serverSavesSentMail: Bool
+    /// How this account signs in to IMAP and SMTP. Defaults to `.password` for
+    /// accounts saved before OAuth 2.0 support was added.
+    public var authMethod: MailAuthMethod
 
-    public init(sender: EmailAddress, username: String, imap: ServerEndpoint, smtp: ServerEndpoint, serverSavesSentMail: Bool) {
+    /// Stable identifier distinguishing multiple accounts across addresses and servers.
+    public var id: String {
+        "\(sender.key)@\(imap.host.lowercased()):\(imap.port)"
+    }
+
+    public init(
+        sender: EmailAddress,
+        username: String,
+        imap: ServerEndpoint,
+        smtp: ServerEndpoint,
+        serverSavesSentMail: Bool,
+        authMethod: MailAuthMethod = .password
+    ) {
         self.sender = sender
         self.username = username
         self.imap = imap
         self.smtp = smtp
         self.serverSavesSentMail = serverSavesSentMail
+        self.authMethod = authMethod
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sender, username, imap, smtp, serverSavesSentMail, authMethod
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sender = try container.decode(EmailAddress.self, forKey: .sender)
+        username = try container.decode(String.self, forKey: .username)
+        imap = try container.decode(ServerEndpoint.self, forKey: .imap)
+        smtp = try container.decode(ServerEndpoint.self, forKey: .smtp)
+        serverSavesSentMail = try container.decode(Bool.self, forKey: .serverSavesSentMail)
+        authMethod = try container.decodeIfPresent(MailAuthMethod.self, forKey: .authMethod) ?? .password
     }
 }
 

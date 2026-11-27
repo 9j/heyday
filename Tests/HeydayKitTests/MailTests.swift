@@ -166,6 +166,96 @@ private func message(
     }
 }
 
+@Suite struct BubbleUpTests {
+    private let base = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func thread(_ uids: UInt32...) -> Conversation {
+        Conversation.group(uids.map { message($0, from: jane, root: "<thread@x>") })[0]
+    }
+
+    @Test func aBubbleUpBecomesDueAtItsScheduledSecond() {
+        let conversation = thread(1)
+        let due = base.addingTimeInterval(3600)
+        let bubble = BubbleUp(dueAt: due, condition: .always, baselineMessageCount: 1, scheduledAt: base)
+
+        #expect(!bubble.isDue(for: conversation, at: due.addingTimeInterval(-1)))
+        #expect(bubble.isDue(for: conversation, at: due))
+        #expect(bubble.isDue(for: conversation, at: due.addingTimeInterval(60)))
+    }
+
+    @Test func anIfNoReplyBubbleUpStandsDownOnceAReplyArrives() {
+        let beforeReply = thread(1)
+        let afterReply = thread(1, 2)
+        let due = base.addingTimeInterval(3600)
+        let bubble = BubbleUp(dueAt: due, condition: .ifNoReply, baselineMessageCount: 1, scheduledAt: base)
+
+        #expect(!bubble.isSatisfiedByReply(in: beforeReply))
+        #expect(bubble.isDue(for: beforeReply, at: due))
+
+        #expect(bubble.isSatisfiedByReply(in: afterReply))
+        #expect(!bubble.isDue(for: afterReply, at: due))
+    }
+}
+
+@Suite struct BubbleUpScheduleTests {
+    private var utcCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }
+
+    private func utc(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+        utcCalendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!
+    }
+
+    @Test func quickPresetsLandOnTheExpectedDaysAndHours() {
+        // Friday, Nov 27, 2026 at 11:00 UTC
+        let fridayMorning = utc(2026, 11, 27, 11, 0)
+
+        #expect(BubbleUpSchedule.date(for: .now, now: fridayMorning, calendar: utcCalendar) == fridayMorning)
+        #expect(BubbleUpSchedule.date(for: .laterToday, now: fridayMorning, calendar: utcCalendar) == utc(2026, 11, 27, 18, 0))
+        #expect(BubbleUpSchedule.date(for: .tomorrow, now: fridayMorning, calendar: utcCalendar) == utc(2026, 11, 28, 8, 0))
+        #expect(BubbleUpSchedule.date(for: .thisWeekend, now: fridayMorning, calendar: utcCalendar) == utc(2026, 11, 28, 8, 0))
+        #expect(BubbleUpSchedule.date(for: .nextWeek, now: fridayMorning, calendar: utcCalendar) == utc(2026, 11, 30, 8, 0))
+        #expect(BubbleUpSchedule.defaultCustomDate(now: fridayMorning, calendar: utcCalendar) == utc(2026, 11, 28, 8, 0))
+    }
+
+    @Test func laterTodayAfterFivePmPushesThreeHoursAhead() {
+        let fridayEvening = utc(2026, 11, 27, 17, 30)
+
+        #expect(BubbleUpSchedule.date(for: .laterToday, now: fridayEvening, calendar: utcCalendar) == utc(2026, 11, 27, 20, 0))
+    }
+
+    @Test func weekendAndNextWeekAdvanceProperlyOnSaturdaySundayAndMonday() {
+        let satEarly = utc(2026, 11, 28, 7, 0)
+        let satLate = utc(2026, 11, 28, 9, 0)
+        let sunday = utc(2026, 11, 29, 10, 0)
+        let monday = utc(2026, 11, 30, 9, 0)
+
+        #expect(BubbleUpSchedule.date(for: .thisWeekend, now: satEarly, calendar: utcCalendar) == utc(2026, 11, 28, 8, 0))
+        #expect(BubbleUpSchedule.date(for: .thisWeekend, now: satLate, calendar: utcCalendar) == utc(2026, 12, 5, 8, 0))
+        #expect(BubbleUpSchedule.date(for: .thisWeekend, now: sunday, calendar: utcCalendar) == utc(2026, 12, 5, 8, 0))
+        #expect(BubbleUpSchedule.date(for: .nextWeek, now: monday, calendar: utcCalendar) == utc(2026, 12, 7, 8, 0))
+    }
+
+    @Test func surpriseMeUsesTheInjectedOffsetAndClampsToTwoThroughFourteenDays() {
+        let friday = utc(2026, 11, 27, 11, 0)
+
+        #expect(BubbleUpSchedule.date(for: .surpriseMe, now: friday, calendar: utcCalendar, randomDayOffset: 0) == utc(2026, 11, 29, 8, 0))
+        #expect(BubbleUpSchedule.date(for: .surpriseMe, now: friday, calendar: utcCalendar, randomDayOffset: 1) == utc(2026, 11, 30, 14, 0))
+        #expect(BubbleUpSchedule.date(for: .surpriseMe, now: friday, calendar: utcCalendar, randomDayOffset: 99) == utc(2026, 12, 11, 8, 0))
+    }
+
+    @Test func shortLabelFormatsWeekdayWithinSevenDaysAndMonthDateBeyond() {
+        let friday = utc(2026, 11, 27, 11, 0)
+        let locale = Locale(identifier: "en_US_POSIX")
+
+        #expect(BubbleUpSchedule.shortLabel(for: utc(2026, 11, 27, 18, 0), now: friday, calendar: utcCalendar, locale: locale) == "Fri, 6pm")
+        #expect(BubbleUpSchedule.shortLabel(for: utc(2026, 11, 28, 8, 30), now: friday, calendar: utcCalendar, locale: locale) == "Sat, 8:30am")
+        #expect(BubbleUpSchedule.shortLabel(for: utc(2026, 12, 6, 8, 0), now: friday, calendar: utcCalendar, locale: locale) == "Dec 6, 8am")
+    }
+}
+
 @Suite struct MailboxDirectoryTests {
     @Test func appFoldersGoUnderBridgesFoldersContainerWhenThereIsOne() {
         let bridge = MailboxDirectory(mailboxes: [

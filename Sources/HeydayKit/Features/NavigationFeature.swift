@@ -114,19 +114,30 @@ public struct NavigationFeature: Feature {
     }
 }
 
-/// Mebox's two parts: what is new, and what has been read.
+/// Mebox's parts: active Bubbled Up mail at the very top, then what is new, then what
+/// has already been seen.
 public struct MeboxSections: Equatable, Sendable {
+    public let bubbledUp: [Conversation]
     public let new: [Conversation]
     public let seen: [Conversation]
 
-    /// - Parameter readThisVisit: conversations to keep under "new" although read.
-    public init(_ conversations: [Conversation], readThisVisit: Set<Conversation.ID>) {
-        new = conversations.filter { !$0.isSeen || readThisVisit.contains($0.id) }
-        seen = conversations.filter { $0.isSeen && !readThisVisit.contains($0.id) }
+    /// - Parameters:
+    ///   - readThisVisit: conversations to keep under "new" although read.
+    ///   - bubbledUp: conversations currently bubbled up to the top of Mebox.
+    public init(
+        _ conversations: [Conversation],
+        readThisVisit: Set<Conversation.ID>,
+        bubbledUp: [Conversation] = []
+    ) {
+        self.bubbledUp = bubbledUp
+        let bubbledIDs = Set(bubbledUp.map(\.id))
+        let rest = conversations.filter { !bubbledIDs.contains($0.id) }
+        new = rest.filter { !$0.isSeen || readThisVisit.contains($0.id) }
+        seen = rest.filter { $0.isSeen && !readThisVisit.contains($0.id) }
     }
 
-    /// Every conversation, in the order the two parts are shown.
-    public var all: [Conversation] { new + seen }
+    /// Every conversation, in the order the sections are shown.
+    public var all: [Conversation] { bubbledUp + new + seen }
 }
 
 /// Paper Trail and The Feed's two parts: what arrived after the previous visit, and

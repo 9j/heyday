@@ -150,6 +150,32 @@ extension Workspace {
                 spoken: "\(sender.displayName): \(place.title)",
                 undoName: "\(place.title) for \(sender.displayName)"
             )
+        case .bubbleUpChanged(_, _, let updated, _):
+            guard let updated else {
+                return ActionPresentation(
+                    title: "Bubble Up Dismissed",
+                    symbol: "bubbles.and.sparkles",
+                    spoken: "Bubble Up dismissed",
+                    undoName: "Dismiss Bubble Up"
+                )
+            }
+            let now = Date()
+            if updated.dueAt <= now.addingTimeInterval(5) {
+                return ActionPresentation(
+                    title: "Bubbled up!",
+                    symbol: "bubbles.and.sparkles",
+                    spoken: "Bubbled up to Mebox",
+                    undoName: "Bubble Up"
+                )
+            }
+            let when = BubbleUpSchedule.shortLabel(for: updated.dueAt, now: now, calendar: .current, locale: .current)
+            let prefix = updated.condition == .ifNoReply ? "If no reply by" : "Bubble Up"
+            return ActionPresentation(
+                title: "\(prefix) \(when)",
+                symbol: updated.condition == .ifNoReply ? "hourglass" : "bubbles.and.sparkles",
+                spoken: "Scheduled Bubble Up for \(when)",
+                undoName: "Bubble Up"
+            )
         }
     }
 

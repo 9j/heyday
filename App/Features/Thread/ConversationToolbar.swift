@@ -12,9 +12,11 @@ struct ConversationToolbar: ToolbarContent {
     let workspace: Workspace
     let conversations: [Conversation]
 
+    @State private var showsBubbleUp = false
     @Environment(\.compose) private var compose
 
     private var single: Conversation? { conversations.count == 1 ? conversations.first : nil }
+    private var hasBubbleUp: Bool { single.flatMap(workspace.bubbleUp(for:)) != nil }
 
     private static var placement: ToolbarItemPlacement {
         #if os(macOS)
@@ -83,6 +85,20 @@ struct ConversationToolbar: ToolbarContent {
             }
             .help("Set Aside (⇧⌘S)")
             .disabled(!workspace.canMove(conversations, to: .appFolder(.setAside)))
+
+            Button("Bubble Up", systemImage: "bubbles.and.sparkles") {
+                showsBubbleUp = true
+            }
+            .tint(hasBubbleUp ? Color.accentColor : nil)
+            .help("Bubble Up (⇧⌘B)")
+            .disabled(single == nil)
+            .popover(isPresented: $showsBubbleUp, arrowEdge: .bottom) {
+                if let single {
+                    BubbleUpPopover(conversation: single, workspace: workspace) {
+                        showsBubbleUp = false
+                    }
+                }
+            }
         }
     }
 

@@ -686,3 +686,106 @@ private func folders(_ assignments: (MailboxDirectory.AppFolder, String?, TimeIn
         #expect(feature.reduce(&state, .remoteArrived(remote)).isEmpty)
     }
 }
+
+@Suite struct BubbleUpRulesTests {
+    @Test func schedulingAndDismissingTrackTheNextFutureDueDateAndPersist() throws {
+        var rules = BubbleUpRules()
+        let past = BubbleUp(dueAt: start.addingTimeInterval(-60), scheduledAt: start.addingTimeInterval(-120))
+        let sooner = BubbleUp(dueAt: start.addingTimeInterval(300), scheduledAt: start)
+        let later = BubbleUp(dueAt: start.addingTimeInterval(900), scheduledAt: start)
+
+        rules.schedule(past, for: "<past>", at: start)
+        rules.schedule(later, for: "<later>", at: start)
+        rules.schedule(sooner, for: "<sooner>", at: start)
+
+        #expect(rules.nextDueDate(after: start) == start.addingTimeInterval(300))
+
+        rules.dismiss(for: "<sooner>", at: start.addingTimeInterval(10))
+        #expect(rules.bubbleUp(for: "<sooner>") == nil)
+        #expect(rules.nextDueDate(after: start) == start.addingTimeInterval(900))
+
+        let url = FileManager.default.temporaryDirectory.appending(path: "heyday-tests-\(UUID().uuidString)/bubbleups.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let store = JSONFileStore<BubbleUpRules>(url: url)
+        try store.save(rules)
+        #expect(try store.load() == rules)
+    }
+
+    @Test func twoDevicesAgreeOnLastScheduleOrDismissEvenInTheSameSecond() {
+        let due = start.addingTimeInterval(3600)
+        var here = BubbleUpRules()
+        here.schedule(BubbleUp(dueAt: due, condition: .always, scheduledAt: start), for: "<a>", at: start)
+
+        var dismissed = here
+        dismissed.dismiss(for: "<a>", at: start.addingTimeInterval(20))
+
+        #expect(here.merged(with: dismissed).bubbleUp(for: "<a>") == nil)
+        #expect(dismissed.merged(with: here).bubbleUp(for: "<a>") == nil)
+
+        var rescheduled = dismissed
+        let laterEntry = BubbleUp(dueAt: due.addingTimeInterval(3600), condition: .ifNoReply, baselineMessageCount: 2, scheduledAt: start.addingTimeInterval(30))
+        rescheduled.schedule(laterEntry, for: "<a>", at: start.addingTimeInterval(30))
+        #expect(dismissed.merged(with: rescheduled).bubbleUp(for: "<a>") == laterEntry)
+        #expect(rescheduled.merged(with: dismissed).bubbleUp(for: "<a>") == laterEntry)
+
+        // Same-second conflict with identical dueAt but differing conditions stays commutative.
+        var one = BubbleUpRules()
+        one.schedule(BubbleUp(dueAt: due, condition: .always, scheduledAt: start), for: "<b>", at: start)
+        var two = BubbleUpRules()
+        two.schedule(BubbleUp(dueAt: due, condition: .ifNoReply, baselineMessageCount: 1, scheduledAt: start), for: "<b>", at: start)
+
+        let ab = one.merged(with: two)
+        let ba = two.merged(with: one)
+        #expect(ab == ba)
+        #expect(ab.merged(with: one) == ab)
+        #expect(ab.merged(with: two) == ab)
+    }
+
+    @Test func bubbleUpsTravelWithSyncedStateAndStayCompatibleWithOlderCopies() {
+        var scheduled = BubbleUpRules()
+        scheduled.schedule(BubbleUp(dueAt: start.addingTimeInterval(3600), scheduledAt: start), for: "<a>", at: start)
+        let here = SyncedState(rules: rules(), folders: FolderAssignments(), bubbleUps: BubbleUpRules())
+        let there = SyncedState(rules: rules(), folders: FolderAssignments(), bubbleUps: scheduled)
+
+        #expect(here.merged(with: there).bubbleUps == scheduled)
+        #expect(there.merged(with: SyncedState(rules: rules(), folders: nil)).bubbleUps == scheduled)
+    }
+}
+
+@Suite struct BubbleUpFeatureTests {
+    private let feature = BubbleUpFeature()
+
+    private var loaded: BubbleUpFeature.State {
+        var state = BubbleUpFeature.State()
+        _ = feature.reduce(&state, .loaded(nil))
+        return state
+    }
+
+    @Test func schedulingAndDismissingSaveImmediatelyOnceLoaded() {
+        var unloaded = BubbleUpFeature.State()
+        let entry = BubbleUp(dueAt: start.addingTimeInterval(3600), scheduledAt: start)
+        #expect(feature.reduce(&unloaded, .loadRequested) == [.load])
+        #expect(feature.reduce(&unloaded, .scheduled("<a>", entry, at: start)).isEmpty)
+
+        var state = loaded
+        let scheduledEffects = feature.reduce(&state, .scheduled("<a>", entry, at: start))
+        #expect(state.rules?.bubbleUp(for: "<a>") == entry)
+        #expect(scheduledEffects == state.rules.map { [.save($0)] })
+
+        let dismissedEffects = feature.reduce(&state, .dismissed("<a>", at: start.addingTimeInterval(10)))
+        #expect(state.rules?.bubbleUp(for: "<a>") == nil)
+        #expect(dismissedEffects == state.rules.map { [.save($0)] })
+
+        // Dismissing a conversation with no active Bubble Up does nothing.
+        #expect(feature.reduce(&state, .dismissed("<a>", at: start.addingTimeInterval(20))).isEmpty)
+    }
+
+    @Test func remoteBubbleUpsMergeAndSaveOnlyWhenChanged() {
+        var state = loaded
+        var remote = BubbleUpRules()
+        remote.schedule(BubbleUp(dueAt: start.addingTimeInterval(1800), scheduledAt: start), for: "<a>", at: start)
+
+        #expect(feature.reduce(&state, .remoteArrived(remote)) == [.save(remote)])
+        #expect(feature.reduce(&state, .remoteArrived(remote)).isEmpty)
+    }
+}

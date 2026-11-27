@@ -11,17 +11,20 @@ public struct SyncedState: Codable, Equatable, Sendable {
     public var folders: FolderAssignments?
     public var notifications: NotificationRules?
     public var visits: BoxVisits?
+    public var bubbleUps: BubbleUpRules?
 
     public init(
         rules: SenderRules?,
         folders: FolderAssignments?,
         notifications: NotificationRules? = nil,
-        visits: BoxVisits? = nil
+        visits: BoxVisits? = nil,
+        bubbleUps: BubbleUpRules? = nil
     ) {
         self.rules = rules
         self.folders = folders
         self.notifications = notifications
         self.visits = visits
+        self.bubbleUps = bubbleUps
     }
 }
 
@@ -31,7 +34,8 @@ extension SyncedState: Mergeable {
             rules: Self.merge(rules, other.rules),
             folders: Self.merge(folders, other.folders),
             notifications: Self.merge(notifications, other.notifications),
-            visits: Self.merge(visits, other.visits)
+            visits: Self.merge(visits, other.visits),
+            bubbleUps: Self.merge(bubbleUps, other.bubbleUps)
         )
     }
 

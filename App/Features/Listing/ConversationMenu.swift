@@ -29,6 +29,35 @@ struct ConversationMenu: View {
             .disabled(!workspace.canMove(conversations, to: .appFolder(.replyLater)))
         Button("Set Aside", systemImage: "pin") { workspace.move(conversations, to: .appFolder(.setAside)) }
             .disabled(!workspace.canMove(conversations, to: .appFolder(.setAside)))
+        if let single {
+            Menu("Bubble Up", systemImage: "bubbles.and.sparkles") {
+                let now = Date()
+                Button("Now") {
+                    workspace.scheduleBubbleUp(single, dueAt: BubbleUpSchedule.date(for: .now, now: now, calendar: .current))
+                }
+                Button("Later today (\(BubbleUpSchedule.shortLabel(for: BubbleUpSchedule.date(for: .laterToday, now: now, calendar: .current), now: now, calendar: .current, locale: .current)))") {
+                    workspace.scheduleBubbleUp(single, dueAt: BubbleUpSchedule.date(for: .laterToday, now: now, calendar: .current))
+                }
+                Button("Tomorrow (\(BubbleUpSchedule.shortLabel(for: BubbleUpSchedule.date(for: .tomorrow, now: now, calendar: .current), now: now, calendar: .current, locale: .current)))") {
+                    workspace.scheduleBubbleUp(single, dueAt: BubbleUpSchedule.date(for: .tomorrow, now: now, calendar: .current))
+                }
+                Button("This weekend (\(BubbleUpSchedule.shortLabel(for: BubbleUpSchedule.date(for: .thisWeekend, now: now, calendar: .current), now: now, calendar: .current, locale: .current)))") {
+                    workspace.scheduleBubbleUp(single, dueAt: BubbleUpSchedule.date(for: .thisWeekend, now: now, calendar: .current))
+                }
+                Button("Next week (\(BubbleUpSchedule.shortLabel(for: BubbleUpSchedule.date(for: .nextWeek, now: now, calendar: .current), now: now, calendar: .current, locale: .current)))") {
+                    workspace.scheduleBubbleUp(single, dueAt: BubbleUpSchedule.date(for: .nextWeek, now: now, calendar: .current))
+                }
+                Button("Surprise me") {
+                    workspace.scheduleBubbleUp(single, dueAt: BubbleUpSchedule.date(for: .surpriseMe, now: now, calendar: .current))
+                }
+                if workspace.bubbleUp(for: single) != nil {
+                    Divider()
+                    Button("Dismiss Bubble Up", role: .destructive) {
+                        workspace.dismissBubbleUp(for: single)
+                    }
+                }
+            }
+        }
         Menu("Move to", systemImage: "folder") {
             Button("Inbox", systemImage: "tray") { workspace.move(conversations, to: .inbox) }
                 .disabled(!workspace.canMove(conversations, to: .inbox))

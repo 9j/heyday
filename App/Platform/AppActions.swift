@@ -42,7 +42,7 @@ private struct DraftAndSettingsPresenter: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .environment(\.compose, ComposeAction { openWindow(value: ComposeRequest($0)) })
+            .environment(\.compose, ComposeAction { openWindow(value: ComposeRequest($0, accountID: services.activeAccountID)) })
             .environment(\.showSettings, ShowSettingsAction { openSettings() })
     }
 }
@@ -55,7 +55,7 @@ private struct DraftAndSettingsPresenter: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .environment(\.compose, ComposeAction { draft = ComposeRequest($0) })
+            .environment(\.compose, ComposeAction { draft = ComposeRequest($0, accountID: services.activeAccountID) })
             .environment(\.showSettings, ShowSettingsAction { showsSettings = true })
             .sheet(item: $draft) { request in
                 NavigationStack {

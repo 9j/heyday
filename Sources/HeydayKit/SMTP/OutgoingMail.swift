@@ -100,6 +100,26 @@ enum SMTPClient {
         password: String,
         using connector: any ByteStreamConnector
     ) async throws(MailError) {
+        try await send(
+            message,
+            from: sender,
+            to: recipients,
+            via: endpoint,
+            username: username,
+            credential: .password(password),
+            using: connector
+        )
+    }
+
+    static func send(
+        _ message: Data,
+        from sender: String,
+        to recipients: [String],
+        via endpoint: ServerEndpoint,
+        username: String,
+        credential: MailCredential,
+        using connector: any ByteStreamConnector
+    ) async throws(MailError) {
         let stream: any ByteStream
         do {
             stream = try await connector.connect(to: endpoint)
@@ -109,7 +129,7 @@ enum SMTPClient {
         defer { stream.close() }
         let reader = BufferedReader(stream: stream)
 
-        func expect(_ accepted: Set<Int>, afterSending command: String?) async throws(MailError) {
+        func readReply(afterSending command: String?) async throws(MailError) -> (code: Int, line: String) {
             do {
                 if let command {
                     try await stream.write(Data("\(command)\r\n".utf8))
@@ -120,7 +140,7 @@ enum SMTPClient {
                     line = String(decoding: try await reader.line(timeout: 60), as: UTF8.self)
                 } while line.count > 3 && line[line.index(line.startIndex, offsetBy: 3)] == "-"
                 guard let code = Int(line.prefix(3)) else { throw MailError(.garbled, line) }
-                guard accepted.contains(code) else { throw MailError(.refused, line) }
+                return (code, line)
             } catch let error as StreamError {
                 throw MailError(.unreachable, error.message)
             } catch let error as MailError {
@@ -128,6 +148,11 @@ enum SMTPClient {
             } catch {
                 throw MailError(.garbled, String(describing: error))
             }
+        }
+
+        func expect(_ accepted: Set<Int>, afterSending command: String?) async throws(MailError) {
+            let reply = try await readReply(afterSending: command)
+            guard accepted.contains(reply.code) else { throw MailError(.refused, reply.line) }
         }
 
         try await expect([220], afterSending: nil)
@@ -142,13 +167,31 @@ enum SMTPClient {
             await reader.discardBuffer()
             try await expect([250], afterSending: "EHLO localhost")
         }
-        let credentials = Data("\u{0}\(username)\u{0}\(password)".utf8).base64EncodedString()
-        do {
-            try await expect([235], afterSending: "AUTH PLAIN \(credentials)")
-        } catch {
-            // Servers disagree on the code for a bad login (535, 534, 454…); whatever
-            // refusal answers AUTH is one.
-            throw error.kind == .refused ? MailError(.loginRefused, error.detail) : error
+        switch credential {
+        case .password(let password):
+            let credentials = Data("\u{0}\(username)\u{0}\(password)".utf8).base64EncodedString()
+            do {
+                try await expect([235], afterSending: "AUTH PLAIN \(credentials)")
+            } catch {
+                // Servers disagree on the code for a bad login (535, 534, 454…); whatever
+                // refusal answers AUTH is one.
+                throw error.kind == .refused ? MailError(.loginRefused, error.detail) : error
+            }
+        case .xoauth2:
+            guard let initial = credential.xoauth2SASLResponse(username: username) else {
+                throw MailError(.notConfigured, "Missing XOAUTH2 token")
+            }
+            let reply = try await readReply(afterSending: "AUTH XOAUTH2 \(initial)")
+            if reply.code == 334 {
+                let challenge = reply.line.count > 4 ? String(reply.line.dropFirst(4)) : ""
+                let challengeDetail = MailCredential.decodeXOAuth2ErrorChallenge(challenge)
+                let finalReply = try? await readReply(afterSending: "")
+                let detail = [challengeDetail, finalReply?.line].compactMap { $0 }.joined(separator: " — ")
+                throw MailError(.loginRefused, detail)
+            }
+            guard reply.code == 235 else {
+                throw MailError(.loginRefused, reply.line)
+            }
         }
         try await expect([250], afterSending: "MAIL FROM:<\(sender)>")
         for recipient in recipients {

@@ -7,9 +7,21 @@ struct ComposeWindow: View {
     let request: ComposeRequest
     let services: AppServices
 
+    @State private var selectedAccountID: MailAccount.ID?
+
+    private var resolvedWorkspace: Workspace? {
+        let targetID = selectedAccountID ?? request.accountID ?? services.activeAccountID
+        return targetID.flatMap(services.workspace(for:)) ?? services.activeWorkspace
+    }
+
     var body: some View {
-        if let workspace = services.activeWorkspace {
-            ComposeView(intent: request.intent, workspace: workspace)
+        if let workspace = resolvedWorkspace {
+            ComposeView(
+                intent: request.intent,
+                workspace: workspace,
+                availableAccounts: request.intent == .newMessage ? services.connectedWorkspaces.map(\.account) : [],
+                onSelectAccount: { selectedAccountID = $0 }
+            )
         } else {
             ContentUnavailableView("No Account Connected", systemImage: "envelope.badge")
         }
@@ -19,6 +31,8 @@ struct ComposeWindow: View {
 private struct ComposeView: View {
     let intent: ComposeIntent
     let workspace: Workspace
+    let availableAccounts: [MailAccount]
+    let onSelectAccount: (MailAccount.ID) -> Void
 
     @State private var store: Store<ComposeFeature>?
     #if !os(macOS)
@@ -43,7 +57,12 @@ private struct ComposeView: View {
                 }
             case .editing, .sending, .sent:
                 if let store {
-                    ComposeForm(store: store)
+                    ComposeForm(
+                        store: store,
+                        activeAccountID: workspace.account.id,
+                        availableAccounts: availableAccounts,
+                        onSelectAccount: onSelectAccount
+                    )
                 }
             }
         }
@@ -77,11 +96,11 @@ private struct ComposeView: View {
         }
         .sensoryFeedback(.success, trigger: store?.state.phase == .sent)
         .sensoryFeedback(.error, trigger: problemCount)
-        .task {
-            guard store == nil else { return }
-            let store = workspace.makeComposer(intent)
-            self.store = store
-            store.send(.opened)
+        .task(id: workspace.account.id) {
+            let preserved = store?.state.draft ?? .init()
+            let next = workspace.makeComposer(intent, draft: intent == .newMessage ? preserved : .init())
+            store = next
+            next.send(.opened)
         }
         .onChange(of: store?.state.phase) { _, phase in
             if phase == .sent { dismiss() }
@@ -146,6 +165,9 @@ private struct ComposeView: View {
 /// The address rows, the message, and under it the original a reply or forward carries.
 private struct ComposeForm: View {
     let store: Store<ComposeFeature>
+    let activeAccountID: MailAccount.ID
+    let availableAccounts: [MailAccount]
+    let onSelectAccount: (MailAccount.ID) -> Void
 
     @State private var showsCarbonCopies = false
     @FocusState private var focus: ComposeFeature.Field?
@@ -174,9 +196,22 @@ private struct ComposeForm: View {
                 }
                 row("Subject:") { field(.subject, text: state.draft.subject) }
                 row("From:") {
-                    Text(state.sender.formatted)
-                        .foregroundStyle(.secondary)
+                    if availableAccounts.count > 1 {
+                        Picker("", selection: Binding(
+                            get: { activeAccountID },
+                            set: { onSelectAccount($0) }
+                        )) {
+                            ForEach(availableAccounts) { account in
+                                Text(account.sender.formatted).tag(account.id)
+                            }
+                        }
+                        .labelsHidden()
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Text(state.sender.formatted)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
             .padding(.horizontal, 16)

@@ -15,9 +15,10 @@ public struct ComposeFeature: Feature {
         public var draft = Draft()
         public var phase: Phase
 
-        public init(intent: ComposeIntent, sender: EmailAddress) {
+        public init(intent: ComposeIntent, sender: EmailAddress, draft: Draft = Draft()) {
             self.intent = intent
             self.sender = sender
+            self.draft = draft
             // A reply or forward starts from the message it is about.
             phase = intent == .newMessage ? .editing(problem: nil) : .preparing
         }

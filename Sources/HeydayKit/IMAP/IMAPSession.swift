@@ -91,6 +91,17 @@ actor IMAPSession {
         password: String,
         using connector: any ByteStreamConnector
     ) async throws(MailError) -> IMAPSession {
+        try await open(endpoint, username: username, credential: .password(password), using: connector)
+    }
+
+    /// Connects, secures the connection as the endpoint asks, and authenticates using
+    /// either a password (`LOGIN`) or an OAuth 2.0 access token (`AUTHENTICATE XOAUTH2`).
+    static func open(
+        _ endpoint: ServerEndpoint,
+        username: String,
+        credential: MailCredential,
+        using connector: any ByteStreamConnector
+    ) async throws(MailError) -> IMAPSession {
         let stream: any ByteStream
         do {
             stream = try await connector.connect(to: endpoint)
@@ -99,7 +110,7 @@ actor IMAPSession {
         }
         let session = IMAPSession(stream: stream)
         do {
-            try await session.start(security: endpoint.security, username: username, password: password)
+            try await session.start(security: endpoint.security, username: username, credential: credential)
         } catch {
             stream.close()
             throw error
@@ -107,7 +118,7 @@ actor IMAPSession {
         return session
     }
 
-    private func start(security: ConnectionSecurity, username: String, password: String) async throws(MailError) {
+    private func start(security: ConnectionSecurity, username: String, credential: MailCredential) async throws(MailError) {
         guard case .status(let status, _) = try await readResponse(), status == .ok || status == .preauth else {
             throw MailError(.garbled, "no greeting")
         }
@@ -120,13 +131,46 @@ actor IMAPSession {
             }
             await reader.discardBuffer()
         }
-        do {
-            try await run([.text("LOGIN "), .string(username), .text(" "), .string(password)])
-        } catch {
-            throw error.kind == .refused ? MailError(.loginRefused, error.detail) : error
-        }
+        try await authenticate(username: username, credential: credential)
         for response in try await run([.text("CAPABILITY")]) {
             if case .capability(let advertised) = response { capabilities = advertised }
+        }
+    }
+
+    private func authenticate(username: String, credential: MailCredential) async throws(MailError) {
+        switch credential {
+        case .password(let password):
+            do {
+                try await run([.text("LOGIN "), .string(username), .text(" "), .string(password)])
+            } catch {
+                throw error.kind == .refused ? MailError(.loginRefused, error.detail) : error
+            }
+        case .xoauth2:
+            guard let initial = credential.xoauth2SASLResponse(username: username) else {
+                throw MailError(.notConfigured, "Missing XOAUTH2 token")
+            }
+            let tag = takeTag()
+            try await write(Data("\(tag) AUTHENTICATE XOAUTH2 \(initial)\r\n".utf8))
+            var challengeDetail: String?
+            while true {
+                switch try await readResponse() {
+                case .continuation(let challenge):
+                    // Per Google/Microsoft XOAUTH2, a continuation after SASL-IR carries a
+                    // base64 JSON error; replying with an empty line terminates the SASL exchange.
+                    if let decoded = MailCredential.decodeXOAuth2ErrorChallenge(challenge) {
+                        challengeDetail = decoded
+                    }
+                    try await write(Data("\r\n".utf8))
+                case .tagged(let done, let status, let text) where done == tag:
+                    if status == .ok { return }
+                    let detail = [challengeDetail, text.isEmpty ? nil : text].compactMap { $0 }.joined(separator: " — ")
+                    throw MailError(.loginRefused, detail)
+                case .capability(let advertised):
+                    capabilities = advertised
+                default:
+                    break
+                }
+            }
         }
     }
 

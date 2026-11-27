@@ -35,6 +35,7 @@ struct ThreadView: View {
                 content
             }
             .padding(widthClass == .compact ? 12 : 20)
+            .padding(.bottom, showsActionDock ? 72 : 0)
             .frame(maxWidth: 860, alignment: .leading)
             .frame(maxWidth: .infinity)
             .motion(Motion.layout, value: expanded)
@@ -42,6 +43,12 @@ struct ThreadView: View {
             .motion(Motion.layout, value: loaded != nil)
         }
         .background(Color.windowBackground)
+        .overlay(alignment: .bottom) {
+            if showsActionDock {
+                ThreadActionDock(conversation: conversation, workspace: workspace)
+                    .padding(.bottom, 16)
+            }
+        }
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentOffset.y + geometry.contentInsets.top > 40
         } action: { _, isOffScreen in
@@ -87,6 +94,15 @@ struct ThreadView: View {
         } message: {
             Text(problem ?? "")
         }
+    }
+
+    private var showsActionDock: Bool {
+        guard marksSeen else { return false }
+        #if os(macOS)
+        return true
+        #else
+        return widthClass == .regular
+        #endif
     }
 
     private static var translatePlacement: ToolbarItemPlacement {
@@ -278,5 +294,109 @@ private struct EarlierMessagesButton: View {
         Rectangle()
             .fill(.separator)
             .frame(height: 1)
+    }
+}
+
+/// Floating action pill at the bottom of an open conversation: Reply, Reply Later,
+/// Set Aside, Bubble Up, and More — matching HEY's signature reading dock.
+private struct ThreadActionDock: View {
+    let conversation: Conversation
+    let workspace: Workspace
+
+    @State private var showsBubbleUp = false
+    @Environment(\.compose) private var compose
+
+    private var activeBubbleUp: BubbleUp? { workspace.bubbleUp(for: conversation) }
+    private var isInSetAside: Bool {
+        workspace.isSetUp(.setAside)
+            && conversation.messageIDs.allSatisfy { $0.mailbox == workspace.folderPath(.setAside) }
+    }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            dockButton("Reply", systemImage: "arrowshape.turn.up.left") {
+                compose(.reply(to: conversation.latest.id))
+            }
+            .help("Reply (⌘R)")
+
+            dockButton("Reply Later", systemImage: "clock") {
+                workspace.move([conversation], to: .appFolder(.replyLater))
+            }
+            .disabled(!workspace.canMove([conversation], to: .appFolder(.replyLater)))
+            .help("Reply Later (⌘L)")
+
+            if isInSetAside {
+                dockButton("Put Back", systemImage: "pin.slash") {
+                    workspace.move([conversation], to: .inbox)
+                }
+                .help("Return to Mebox")
+            } else {
+                dockButton("Set Aside", systemImage: "pin") {
+                    workspace.move([conversation], to: .appFolder(.setAside))
+                }
+                .disabled(!workspace.canMove([conversation], to: .appFolder(.setAside)))
+                .help("Set Aside (⇧⌘S)")
+            }
+
+            dockButton(
+                "Bubble Up",
+                systemImage: activeBubbleUp?.condition == .ifNoReply ? "hourglass" : "bubbles.and.sparkles",
+                isActive: activeBubbleUp != nil
+            ) {
+                showsBubbleUp = true
+            }
+            .help("Bubble Up (⇧⌘B)")
+            .popover(isPresented: $showsBubbleUp, arrowEdge: .top) {
+                BubbleUpPopover(conversation: conversation, workspace: workspace) {
+                    showsBubbleUp = false
+                }
+            }
+
+            Menu {
+                ConversationMenu(workspace: workspace, conversations: [conversation])
+            } label: {
+                VStack(spacing: 3) {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 14, weight: .medium))
+                        .frame(height: 18)
+                    Text("More")
+                        .font(.caption2.weight(.medium))
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .contentShape(Capsule())
+            }
+            #if os(macOS)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            #endif
+            .fixedSize()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .floatingSurface(in: Capsule())
+    }
+
+    private func dockButton(
+        _ title: String,
+        systemImage: String,
+        isActive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(height: 18)
+                Text(title)
+                    .font(.caption2.weight(.medium))
+            }
+            .foregroundStyle(isActive ? Color.accentColor : Color.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.pressable)
     }
 }

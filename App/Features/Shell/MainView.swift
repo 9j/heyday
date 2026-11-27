@@ -5,6 +5,7 @@ import SwiftUI
 /// the chosen list's conversations beside it, and the open conversation on the right.
 struct MainView: View {
     let workspace: Workspace
+    let services: AppServices
 
     @State private var searchText = ""
     @State private var undoEntries = UndoEntries()
@@ -25,12 +26,12 @@ struct MainView: View {
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(workspace: workspace)
+            SidebarView(workspace: workspace, services: services)
                 .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 300)
+                .collapsesMacDetailColumn(isFeedStream)
         } content: {
             ConversationColumn(workspace: workspace)
                 .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: isFeedStream ? nil : 520)
-                .collapsesMacDetailColumn(isFeedStream)
                 .toolbar { composeToolbar }
         } detail: {
             DetailColumn(workspace: workspace)
@@ -48,6 +49,7 @@ struct MainView: View {
             if search == nil { searchText = "" }
         }
         .focusedSceneValue(\.mailWindow, MailWindow(
+            services: services,
             workspace: workspace,
             selection: workspace.selectedConversations,
             compose: compose,
@@ -73,7 +75,6 @@ struct MainView: View {
         .onDisappear {
             undoEntries.withdrawAll(from: undoManager)
         }
-        .announcesNewMail(unseen: workspace.unseenMeboxConversations?.count, toAnnounce: workspace.unseenToAnnounce)
         .alert(
             "Heyday Couldn’t Store Your Choices",
             isPresented: Binding(get: { workspace.storageProblem != nil }, set: { if !$0 { workspace.dismissStorageProblem() } }),
@@ -82,10 +83,6 @@ struct MainView: View {
             Button("OK") {}
         } message: { problem in
             Text(problem)
-        }
-        // Coming back to the app is when another device's changes are wanted.
-        .onReceive(NotificationCenter.default.publisher(for: .appBecameActive)) { _ in
-            workspace.cameToTheFront()
         }
         .sheet(item: Binding(
             get: { workspace.appFolders.state.choice },
@@ -120,13 +117,30 @@ extension MainView {
         #endif
     }
 
-    /// How far above the window's bottom edge the notice floats: on a phone, clear
-    /// of the bar of buttons that floats there too.
+    /// Whether a bottom floating pill (the thread action dock or Mebox's Set Aside pile)
+    /// is visible so the Undo notice should float clearly above it.
+    private var showsFloatingBottomChrome: Bool {
+        let isScreening = navigation.state.search == nil && navigation.state.listing == .screener
+        let hasThreadDock = workspace.selectedConversations.count == 1 && !isScreening
+        let hasSetAsidePile = navigation.state.search == nil
+            && navigation.state.listing == .box(.mebox)
+            && !workspace.setAsideConversations.isEmpty
+        return hasThreadDock || hasSetAsidePile
+    }
+
+    /// How far above the window's bottom edge the notice floats, staying clear of
+    /// the bottom bar on iPhone and of the Set Aside pile / thread action dock.
     fileprivate var toastClearance: CGFloat {
         #if os(macOS)
-        18
+        showsFloatingBottomChrome ? 78 : 18
         #else
-        widthClass == .compact ? 62 : 18
+        if widthClass == .compact {
+            let hasSetAsidePile = navigation.state.search == nil
+                && navigation.state.listing == .box(.mebox)
+                && !workspace.setAsideConversations.isEmpty
+            return hasSetAsidePile ? 124 : 62
+        }
+        return showsFloatingBottomChrome ? 78 : 18
         #endif
     }
 

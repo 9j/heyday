@@ -106,29 +106,47 @@ struct MailboxList: View {
             ConversationListPlaceholder()
         case .loaded(let loaded):
             let older = olderMail(loaded)
-            if workspace.conversations(for: listing).isEmpty, older != .onScroll {
-                ContentUnavailableView {
-                    Label(presentation.emptyTitle, systemImage: presentation.symbol)
-                } actions: {
-                    pagingRow(loaded, older)
-                }
-            } else if listing == .screener {
-                ScreenerList(workspace: workspace) { pagingRow(loaded, older) }
+            let showsSetAsidePile = listing == .box(.mebox) && !workspace.setAsideConversations.isEmpty
+            Group {
+                if workspace.conversations(for: listing).isEmpty, older != .onScroll {
+                    ContentUnavailableView {
+                        Label(presentation.emptyTitle, systemImage: presentation.symbol)
+                    } actions: {
+                        pagingRow(loaded, older)
+                    }
+                } else if listing == .screener {
+                    ScreenerList(workspace: workspace) { pagingRow(loaded, older) }
+                        .refreshable { await workspace.refresh(listing) }
+                } else if showsFeedCardsHere {
+                    FeedView(workspace: workspace) { pagingRow(loaded, older) }
+                } else {
+                    ConversationList(
+                        sections: sections,
+                        workspace: workspace,
+                        showsRecipient: workspace.mailboxPath(for: listing) == workspace.directory.path(for: .sent),
+                        showsUnreadIndicator: showsUnreadIndicator
+                    ) {
+                        pagingRow(loaded, older)
+                    }
+                    .contentMargins(.bottom, showsSetAsidePile ? 76 : 0, for: .scrollContent)
                     .refreshable { await workspace.refresh(listing) }
-            } else if showsFeedCardsHere {
-                FeedView(workspace: workspace) { pagingRow(loaded, older) }
-            } else {
-                ConversationList(
-                    sections: sections,
-                    workspace: workspace,
-                    showsRecipient: workspace.mailboxPath(for: listing) == workspace.directory.path(for: .sent),
-                    showsUnreadIndicator: showsUnreadIndicator
-                ) {
-                    pagingRow(loaded, older)
                 }
-                .refreshable { await workspace.refresh(listing) }
+            }
+            .overlay(alignment: .bottom) {
+                if listing == .box(.mebox) {
+                    SetAsidePile(workspace: workspace)
+                        .padding(.bottom, setAsidePileClearance)
+                }
             }
         }
+    }
+
+    private var setAsidePileClearance: CGFloat {
+        #if os(macOS)
+        14
+        #else
+        widthClass == .compact ? 62 : 14
+        #endif
     }
 
     private var showsUnreadIndicator: Bool {
@@ -142,10 +160,19 @@ struct MailboxList: View {
         switch listing {
         case .box(.mebox):
             let mebox = workspace.meboxSections
-            return [
-                .init(title: "New for You", conversations: mebox.new, emptyNote: "You’re all caught up."),
-                .init(title: "Previously Seen", conversations: mebox.seen),
-            ]
+            var result: [ConversationSection] = []
+            if !mebox.bubbledUp.isEmpty {
+                result.append(.init(header: .bubbledUp, conversations: mebox.bubbledUp))
+            }
+            if !mebox.new.isEmpty || mebox.bubbledUp.isEmpty {
+                result.append(.init(
+                    title: "New for You",
+                    conversations: mebox.new,
+                    emptyNote: mebox.bubbledUp.isEmpty ? "You’re all caught up." : nil
+                ))
+            }
+            result.append(.init(title: "Previously Seen", conversations: mebox.seen))
+            return result
         case .box(.paperTrail):
             return visitedSections(for: .paperTrail)
         case .box(.feed):

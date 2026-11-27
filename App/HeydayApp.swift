@@ -44,12 +44,15 @@ struct HeydayApp: App {
     }
 }
 
-/// One draft. Each request is its own, so two can be open at once on a Mac.
+/// One draft. Each request is its own, so two can be open at once on a Mac, and
+/// remembers which account it was started from.
 struct ComposeRequest: Hashable, Codable, Identifiable {
     var id = UUID()
     let intent: ComposeIntent
+    let accountID: MailAccount.ID?
 
-    init(_ intent: ComposeIntent) {
+    init(_ intent: ComposeIntent, accountID: MailAccount.ID? = nil) {
         self.intent = intent
+        self.accountID = accountID
     }
 }

@@ -84,7 +84,7 @@ public actor IMAPMailService: MailService {
     private static let idlePatience: TimeInterval = 25 * 60
 
     private let account: MailAccount
-    private let password: String
+    private let credentials: any CredentialProvider
     private let connector: any ByteStreamConnector
     private let now: @Sendable () -> Date
     private var session: IMAPSession?
@@ -98,8 +98,22 @@ public actor IMAPMailService: MailService {
         connector: any ByteStreamConnector,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
+        self.init(
+            account: account,
+            credentials: StaticCredentialProvider(.password(password)),
+            connector: connector,
+            now: now
+        )
+    }
+
+    public init(
+        account: MailAccount,
+        credentials: any CredentialProvider,
+        connector: any ByteStreamConnector,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.account = account
-        self.password = password
+        self.credentials = credentials
         self.connector = connector
         self.now = now
     }
@@ -217,15 +231,18 @@ public actor IMAPMailService: MailService {
 
     public func send(_ mail: OutgoingMail) async throws(MailError) {
         let message = mail.rfc5322(messageID: OutgoingMail.newMessageID(for: mail.from), date: now())
-        try await SMTPClient.send(
-            message,
-            from: mail.from.address,
-            to: mail.recipients.map(\.address),
-            via: account.smtp,
-            username: account.username,
-            password: password,
-            using: connector
-        )
+        let recipients = mail.recipients.map(\.address)
+        try await withFreshCredential { credential throws(MailError) in
+            try await SMTPClient.send(
+                message,
+                from: mail.from.address,
+                to: recipients,
+                via: account.smtp,
+                username: account.username,
+                credential: credential,
+                using: connector
+            )
+        }
         guard !account.serverSavesSentMail else { return }
         let directory = try await self.directory()
         if let sent = directory.path(for: .sent) {
@@ -234,7 +251,7 @@ public actor IMAPMailService: MailService {
     }
 
     public func waitForChange(in mailbox: String) async throws(MailError) {
-        let idle = try await IMAPSession.open(account.imap, username: account.username, password: password, using: connector)
+        let idle = try await openSession()
         do {
             try await idle.select(mailbox, readOnly: true)
             try await idle.waitForChange(patience: Self.idlePatience)
@@ -246,6 +263,26 @@ public actor IMAPMailService: MailService {
     }
 
     // MARK: Connection
+
+    private func openSession() async throws(MailError) -> IMAPSession {
+        try await withFreshCredential { credential throws(MailError) in
+            try await IMAPSession.open(account.imap, username: account.username, credential: credential, using: connector)
+        }
+    }
+
+    /// Runs a login-bearing operation and retries once with a forced OAuth refresh if
+    /// the server refused an access token that was revoked before its local expiry.
+    private func withFreshCredential<Value: Sendable>(
+        _ operation: (MailCredential) async throws(MailError) -> Value
+    ) async throws(MailError) -> Value {
+        let initial = try await credentials.credential(forceRefresh: false)
+        do {
+            return try await operation(initial)
+        } catch where error.kind == .loginRefused && credentials.supportsRefresh {
+            let refreshed = try await credentials.credential(forceRefresh: true)
+            return try await operation(refreshed)
+        }
+    }
 
     /// Runs commands on the shared connection, dialling it if needed, once every
     /// request ahead of this one has finished. A connection that turns out to be dead
@@ -264,7 +301,7 @@ public actor IMAPMailService: MailService {
                 self.session = nil
             }
         }
-        let fresh = try await IMAPSession.open(account.imap, username: account.username, password: password, using: connector)
+        let fresh = try await openSession()
         session = fresh
         return try await commands(fresh)
     }

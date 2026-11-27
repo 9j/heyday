@@ -97,7 +97,7 @@ private func loggedIn(_ replies: [(expects: String, reply: String)]) async throw
     }
 
     @Test func statusAndDataResponsesAreRecognised() throws {
-        #expect(try response("+ go ahead") == .continuation)
+        #expect(try response("+ go ahead") == .continuation("go ahead"))
         #expect(try response("A7 NO [TRYCREATE] no such mailbox") == .tagged(tag: "A7", status: .no, text: "[TRYCREATE] no such mailbox"))
         #expect(try response("* OK [UIDNEXT 42] it's (fine") == .status(.ok, text: "[UIDNEXT 42] it's (fine"))
         #expect(try response("* 23 EXISTS") == .exists(23))

@@ -7,24 +7,40 @@ import SwiftUI
 struct SettingsView: View {
     let services: AppServices
 
+    @State private var selectedAccountID: MailAccount.ID?
     #if !os(macOS)
     @Environment(\.dismiss) private var dismiss
     #endif
 
+    private var selectedSlot: AccountSlot? {
+        if let selectedAccountID, let match = services.slot(for: selectedAccountID) {
+            return match
+        }
+        return services.activeSlot
+    }
+
+    private var selectedWorkspace: Workspace? {
+        selectedSlot?.workspace
+    }
+
+    private var accountsTabTitle: String {
+        services.slots.count > 1 ? "Accounts" : "Account"
+    }
+
     var body: some View {
         #if os(macOS)
         TabView {
-            Tab("Account", systemImage: "person.crop.circle") { account }
+            Tab(accountsTabTitle, systemImage: "person.crop.circle") { accounts }
             Tab("Screener", systemImage: "hand.thumbsup") { screener }
             Tab("Notifications", systemImage: "bell") { notifications }
             Tab("Folders", systemImage: "folder") { folders }
             Tab("Translation", systemImage: "translate") { translation }
         }
-        .frame(width: 560, height: 420)
+        .frame(width: 580, height: 460)
         #else
         NavigationStack {
             List {
-                NavigationLink { account.navigationTitle("Account") } label: { Label("Account", systemImage: "person.crop.circle") }
+                NavigationLink { accounts.navigationTitle(accountsTabTitle) } label: { Label(accountsTabTitle, systemImage: "person.crop.circle") }
                 NavigationLink { screener.navigationTitle("Screener") } label: { Label("Screener", systemImage: "hand.thumbsup") }
                 NavigationLink { notifications.navigationTitle("Notifications") } label: { Label("Notifications", systemImage: "bell") }
                 NavigationLink { folders.navigationTitle("Folders") } label: { Label("Folders", systemImage: "folder") }
@@ -41,34 +57,64 @@ struct SettingsView: View {
         #endif
     }
 
-    private var account: some View {
-        AccountSettings(session: services.session, workspace: services.activeWorkspace)
+    private var accounts: some View {
+        AccountSettings(services: services, selectedAccountID: $selectedAccountID) {
+            #if os(macOS)
+            services.beginAddingAccount()
+            #else
+            dismiss()
+            Task { @MainActor in services.beginAddingAccount() }
+            #endif
+        }
     }
 
     @ViewBuilder
     private var screener: some View {
-        if let workspace = services.activeWorkspace {
+        accountScoped(symbol: "hand.thumbsup") { workspace in
             ScreenerSettings(workspace: workspace)
-        } else {
-            ContentUnavailableView("No Account Connected", systemImage: "hand.thumbsup")
         }
     }
 
     @ViewBuilder
     private var notifications: some View {
-        if let workspace = services.activeWorkspace {
+        accountScoped(symbol: "bell") { workspace in
             NotificationSettings(workspace: workspace)
-        } else {
-            ContentUnavailableView("No Account Connected", systemImage: "bell")
         }
     }
 
     @ViewBuilder
     private var folders: some View {
-        if let workspace = services.activeWorkspace {
+        accountScoped(symbol: "folder") { workspace in
             FolderSettings(workspace: workspace)
+        }
+    }
+
+    @ViewBuilder
+    private func accountScoped<Content: View>(symbol: String, @ViewBuilder content: (Workspace) -> Content) -> some View {
+        if let workspace = selectedWorkspace {
+            VStack(spacing: 0) {
+                if services.slots.count > 1 {
+                    HStack {
+                        Picker("Account", selection: Binding(
+                            get: { selectedSlot?.id ?? workspace.account.id },
+                            set: { selectedAccountID = $0 }
+                        )) {
+                            ForEach(services.slots) { slot in
+                                Text(slot.account.sender.address).tag(slot.id)
+                            }
+                        }
+                        .frame(maxWidth: 320)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    Divider()
+                }
+                content(workspace)
+                    .id(workspace.account.id)
+            }
         } else {
-            ContentUnavailableView("No Account Connected", systemImage: "folder")
+            ContentUnavailableView("No Account Connected", systemImage: symbol)
         }
     }
 
@@ -78,32 +124,82 @@ struct SettingsView: View {
 }
 
 private struct AccountSettings: View {
-    let session: Store<AccountFeature>
-    /// The connected account's window state, for what it keeps the same on every Mac.
-    let workspace: Workspace?
+    let services: AppServices
+    @Binding var selectedAccountID: MailAccount.ID?
+    let onAddAccount: () -> Void
 
-    @State private var isConfirmingRemoval = false
+    @State private var accountPendingRemoval: MailAccount?
 
-    private var account: MailAccount? {
-        switch session.state {
-        case .ready(let account, _), .unavailable(let account, _), .connecting(let account, _): account
-        case .restoring, .settingUp: nil
+    private var selectedSlot: AccountSlot? {
+        if let selectedAccountID, let match = services.slot(for: selectedAccountID) {
+            return match
         }
+        return services.activeSlot
     }
 
     var body: some View {
-        if let account {
+        if let slot = selectedSlot {
+            let account = slot.account
+            let hasMultipleAccounts = services.slots.count > 1
             Form {
+                if hasMultipleAccounts {
+                    Section("Accounts") {
+                        ForEach(services.slots) { candidate in
+                            Button {
+                                selectedAccountID = candidate.id
+                                services.selectAccount(candidate.id)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    AvatarView(address: candidate.account.sender, size: 24)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(candidate.account.sender.displayName)
+                                            .font(.subheadline.weight(.medium))
+                                            .foregroundStyle(.primary)
+                                        Text(candidate.account.sender.address)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    statusLabel(for: candidate)
+                                    if candidate.id == slot.id {
+                                        Image(systemName: "checkmark")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(Color.accentColor)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Button("Add Account…", systemImage: "plus", action: onAddAccount)
+                    }
+                }
+
                 Section {
                     LabeledContent("Name", value: account.sender.name)
                     LabeledContent("Email Address", value: account.sender.address)
                     LabeledContent("Username", value: account.username)
+                    LabeledContent("Sign In") {
+                        HStack(spacing: 8) {
+                            Text(Self.describe(account.authMethod))
+                                .foregroundStyle(.secondary)
+                            if account.authMethod.isOAuth2 {
+                                Button("Sign In Again") { slot.session.send(.reauthorizeRequested) }
+                            }
+                        }
+                    }
+                } header: {
+                    if hasMultipleAccounts {
+                        Text("Selected Account")
+                    }
                 }
+
                 Section {
                     LabeledContent("Incoming Mail (IMAP)", value: Self.describe(account.imap))
                     LabeledContent("Outgoing Mail (SMTP)", value: Self.describe(account.smtp))
                 }
-                if let workspace {
+
+                if let workspace = slot.workspace {
                     Section {
                         LabeledContent("Screener, Notifications and Folders") {
                             HStack {
@@ -120,18 +216,63 @@ private struct AccountSettings: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+
                 Section {
-                    Button("Remove Account…", role: .destructive) { isConfirmingRemoval = true }
+                    if !hasMultipleAccounts {
+                        Button("Add Another Account…", systemImage: "plus", action: onAddAccount)
+                    }
+                    Button("Remove Account…", role: .destructive) { accountPendingRemoval = account }
                 }
             }
             .formStyle(.grouped)
-            .confirmationDialog("Remove \(account.sender.address) from Heyday?", isPresented: $isConfirmingRemoval) {
-                Button("Remove Account", role: .destructive) { session.send(.signOutRequested) }
+            .confirmationDialog(
+                "Remove \(accountPendingRemoval?.sender.address ?? "") from Heyday?",
+                isPresented: Binding(
+                    get: { accountPendingRemoval != nil },
+                    set: { if !$0 { accountPendingRemoval = nil } }
+                )
+            ) {
+                Button("Remove Account", role: .destructive) {
+                    if let target = accountPendingRemoval {
+                        services.removeAccount(target.id)
+                        accountPendingRemoval = nil
+                    }
+                }
             } message: {
                 Text("Your mail stays on the server. You can add the account again at any time.")
             }
         } else {
-            ContentUnavailableView("No Account", systemImage: "person.crop.circle", description: Text("Add an account in the main window."))
+            ContentUnavailableView {
+                Label("No Accounts", systemImage: "person.crop.circle")
+            } description: {
+                Text("Add a mail account to get started.")
+            } actions: {
+                Button("Add Account…", action: onAddAccount)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func statusLabel(for slot: AccountSlot) -> some View {
+        switch slot.session.state {
+        case .ready:
+            Text("Connected")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .connecting, .restoring:
+            ProgressView()
+                .controlSize(.small)
+        case .authorizing:
+            Text("Signing In…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .unavailable:
+            Label("Offline", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        case .settingUp:
+            EmptyView()
         }
     }
 
@@ -141,6 +282,13 @@ private struct AccountSettings: View {
         case .running: "Syncing…"
         case .upToDate(let time): "Up to date as of \(time.formatted(date: .omitted, time: .shortened))"
         case .failed(let error): error.userMessage
+        }
+    }
+
+    private static func describe(_ auth: MailAuthMethod) -> String {
+        switch auth {
+        case .password: "Password"
+        case .oauth2(let config): "OAuth 2.0 (\(config.provider.displayName))"
         }
     }
 

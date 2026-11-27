@@ -115,55 +115,145 @@ extension View {
 }
 
 #if os(macOS)
+private final class SplitCollapseAnchorView: NSView {
+    var onAttach: (() -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { onAttach?() }
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        if window != nil { onAttach?() }
+    }
+}
+
 private struct MacDetailColumnCollapse: NSViewRepresentable {
     let isCollapsed: Bool
 
     func makeCoordinator() -> Coordinator { Coordinator() }
-    func makeNSView(context: Context) -> NSView { NSView() }
 
-    func updateNSView(_ view: NSView, context: Context) {
+    func makeNSView(context: Context) -> NSView {
+        let view = SplitCollapseAnchorView()
         let coordinator = context.coordinator
-        guard let splitViewController = Self.splitViewController(from: view),
-              splitViewController.splitViewItems.count == 3
-        else { return }
-
-        let content = splitViewController.splitViewItems[1]
-        let detail = splitViewController.splitViewItems[2]
-
-        if isCollapsed {
-            guard !detail.isCollapsed else { return }
-            let middleMaxX = splitViewController.splitView.arrangedSubviews[1].frame.maxX
-            if middleMaxX > 0 { coordinator.savedDividerX = middleMaxX }
-            content.maximumThickness = NSSplitViewItem.unspecifiedDimension
-            detail.canCollapse = true
-            detail.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
-            detail.isCollapsed = true
-        } else if detail.isCollapsed {
-            let targetX = coordinator.savedDividerX ?? 580
-            detail.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
-            detail.isCollapsed = false
-            detail.canCollapse = false
-            splitViewController.splitView.setPosition(targetX, ofDividerAt: 1)
-            DispatchQueue.main.async { [weak splitViewController] in
-                MainActor.assumeIsolated {
-                    splitViewController?.splitView.setPosition(targetX, ofDividerAt: 1)
-                }
+        view.onAttach = { [weak view] in
+            MainActor.assumeIsolated {
+                guard let view else { return }
+                coordinator.scheduleApply(for: view)
             }
         }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.desiredCollapsed = isCollapsed
+        context.coordinator.scheduleApply(for: view)
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.tearDown()
     }
 
     @MainActor
     final class Coordinator {
+        var desiredCollapsed = false
         var savedDividerX: CGFloat?
-    }
+        private var pendingWork: DispatchWorkItem?
+        private var collapseObservation: NSKeyValueObservation?
+        private weak var observedDetail: NSSplitViewItem?
+        private var isApplying = false
 
-    private static func splitViewController(from view: NSView) -> NSSplitViewController? {
-        var responder: NSResponder? = view
-        while let current = responder {
-            if let splitViewController = current as? NSSplitViewController { return splitViewController }
-            responder = current.nextResponder
+        func tearDown() {
+            pendingWork?.cancel()
+            pendingWork = nil
+            collapseObservation?.invalidate()
+            collapseObservation = nil
+            observedDetail = nil
         }
-        return nil
+
+        func scheduleApply(for view: NSView) {
+            pendingWork?.cancel()
+            let work = DispatchWorkItem { [weak self, weak view] in
+                MainActor.assumeIsolated {
+                    guard let self, let view else { return }
+                    self.apply(for: view)
+                }
+            }
+            pendingWork = work
+            // Defer out of SwiftUI's synchronous update pass to avoid AttributeGraph
+            // cycles and ensure NavigationSplitView finishes updating column widths first.
+            DispatchQueue.main.async(execute: work)
+        }
+
+        private func apply(for view: NSView) {
+            guard !isApplying,
+                  let splitViewController = Self.splitViewController(from: view),
+                  splitViewController.splitViewItems.count == 3
+            else { return }
+
+            let content = splitViewController.splitViewItems[1]
+            let detail = splitViewController.splitViewItems[2]
+
+            ensureObserving(detail: detail, view: view)
+
+            isApplying = true
+            defer { isApplying = false }
+
+            if desiredCollapsed {
+                content.maximumThickness = NSSplitViewItem.unspecifiedDimension
+                detail.canCollapse = true
+                detail.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
+                if !detail.isCollapsed {
+                    let middleMaxX = splitViewController.splitView.arrangedSubviews[1].frame.maxX
+                    if middleMaxX > 0 { savedDividerX = middleMaxX }
+                    detail.isCollapsed = true
+                }
+                splitViewController.splitView.adjustSubviews()
+            } else {
+                if detail.isCollapsed {
+                    let targetX = savedDividerX ?? 580
+                    detail.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
+                    detail.isCollapsed = false
+                    detail.canCollapse = false
+                    content.maximumThickness = 520
+                    splitViewController.splitView.setPosition(targetX, ofDividerAt: 1)
+                    DispatchQueue.main.async { [weak splitViewController] in
+                        MainActor.assumeIsolated {
+                            splitViewController?.splitView.setPosition(targetX, ofDividerAt: 1)
+                        }
+                    }
+                } else {
+                    detail.canCollapse = false
+                    content.maximumThickness = 520
+                }
+            }
+        }
+
+        private func ensureObserving(detail: NSSplitViewItem, view: NSView) {
+            guard observedDetail !== detail else { return }
+            collapseObservation?.invalidate()
+            observedDetail = detail
+            collapseObservation = detail.observe(\.isCollapsed, options: [.new]) { [weak self, weak view] _, _ in
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        guard let self, let view, !self.isApplying, let currentDetail = self.observedDetail else { return }
+                        if self.desiredCollapsed != currentDetail.isCollapsed {
+                            self.scheduleApply(for: view)
+                        }
+                    }
+                }
+            }
+        }
+
+        private static func splitViewController(from view: NSView) -> NSSplitViewController? {
+            var responder: NSResponder? = view
+            while let current = responder {
+                if let splitViewController = current as? NSSplitViewController { return splitViewController }
+                responder = current.nextResponder
+            }
+            return nil
+        }
     }
 }
 /// Watches a `List`'s row order and asks its backing `NSTableView` to re-measure any

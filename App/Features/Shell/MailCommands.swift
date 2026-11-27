@@ -3,6 +3,7 @@ import SwiftUI
 
 /// What the menu bar can act on: the mail window in front and what is selected in it.
 struct MailWindow {
+    let services: AppServices
     let workspace: Workspace
     let selection: [Conversation]
     let compose: ComposeAction
@@ -43,6 +44,13 @@ struct MailCommands: Commands {
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
             .disabled(window == nil)
+
+            Divider()
+
+            Button("Add Account…") {
+                window?.services.beginAddingAccount()
+            }
+            .disabled(window == nil)
         }
 
         CommandGroup(after: .textEditing) {
@@ -60,6 +68,20 @@ struct MailCommands: Commands {
                 .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
             }
             .disabled(window == nil)
+
+            if let services = window?.services, services.slots.count > 1 {
+                Divider()
+                ForEach(Array(services.slots.prefix(9).enumerated()), id: \.element.id) { index, slot in
+                    Button(slot.account.sender.address) {
+                        services.selectAccount(slot.id)
+                    }
+                    .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [.command, .option])
+                }
+                Button("Next Account") {
+                    services.selectNextAccount()
+                }
+                .keyboardShortcut("]", modifiers: [.command, .option])
+            }
         }
 
         CommandMenu("Message") {
@@ -98,6 +120,16 @@ struct MailCommands: Commands {
             Button("Set Aside") { window?.workspace.move(selection, to: .appFolder(.setAside)) }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(window?.workspace.canMove(selection, to: .appFolder(.setAside)) != true)
+            Button("Bubble Up Now") {
+                if let single { window?.workspace.scheduleBubbleUp(single, dueAt: .now) }
+            }
+            .keyboardShortcut("b", modifiers: [.command, .shift])
+            .disabled(single == nil)
+            if let window, let single, window.workspace.bubbleUp(for: single) != nil {
+                Button("Dismiss Bubble Up") {
+                    window.workspace.dismissBubbleUp(for: single)
+                }
+            }
             Button("Archive") { window?.workspace.move(selection, to: .role(.archive)) }
                 .keyboardShortcut("a", modifiers: [.command, .control])
                 .disabled(window?.workspace.canMove(selection, to: .role(.archive)) != true)

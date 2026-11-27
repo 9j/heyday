@@ -117,6 +117,19 @@ private func page(_ uids: [UInt32], hasMore: Bool = false) -> SummaryPage {
         #expect(sections.seen == [old])
         #expect(sections.all == [unread, justRead, old])
     }
+
+    @Test func bubbledUpConversationsFloatToTheTopWithoutDuplicatingBelow() {
+        let unread = conversation(3, seen: false)
+        let old = conversation(2, seen: true)
+        let setAsidePinned = conversation(1, seen: true)
+
+        let sections = MeboxSections([unread, old], readThisVisit: [], bubbledUp: [old, setAsidePinned])
+
+        #expect(sections.bubbledUp == [old, setAsidePinned])
+        #expect(sections.new == [unread])
+        #expect(sections.seen.isEmpty)
+        #expect(sections.all == [old, setAsidePinned, unread])
+    }
 }
 
 @Suite struct VisitedBoxSectionsTests {
@@ -468,6 +481,13 @@ private func page(_ uids: [UInt32], hasMore: Bool = false) -> SummaryPage {
     @Test func aDecisionAboutASenderCanAlwaysBeTakenBack() {
         #expect(MailAction.senderDecided(sender, .screenedOut, previously: nil, markedRead: []).canBeTakenBack)
         #expect(MailAction.senderDecided(sender, .screenedOut, previously: .approved(.mebox), markedRead: [.init(mailbox: "INBOX", uid: 4)]).canBeTakenBack)
+    }
+
+    @Test func aBubbleUpChangeCanAlwaysBeTakenBack() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let entry = BubbleUp(dueAt: now.addingTimeInterval(3600), scheduledAt: now)
+        #expect(MailAction.bubbleUpChanged("<a>", subject: "Hello", entry, previously: nil).canBeTakenBack)
+        #expect(MailAction.bubbleUpChanged("<a>", subject: "Hello", nil, previously: entry).canBeTakenBack)
     }
 
     @Test func puttingANoticeAwayClearsIt() {

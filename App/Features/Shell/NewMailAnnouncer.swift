@@ -4,15 +4,15 @@ import SwiftUI
 import UserNotifications
 
 extension View {
-    /// Keeps the app's badge at the number of unread Mebox conversations, and posts
-    /// a notification for each conversation the person asked to be told about that
-    /// turns up unread while the app is running.
-    /// - Parameters:
-    ///   - unseen: how many Mebox conversations are unread. Nil before that is known.
-    ///   - toAnnounce: the unread conversations notifications are on for. Nil
-    ///     before that is known.
-    func announcesNewMail(unseen: Int?, toAnnounce: [Conversation]?) -> some View {
-        modifier(NewMailAnnouncer(unseen: unseen, toAnnounce: toAnnounce))
+    /// Keeps the app's badge at the total unread Mebox conversations across all
+    /// connected accounts, and posts a notification for each newly arrived
+    /// conversation the person asked to be told about.
+    func announcesNewMail(
+        unseen: Int?,
+        byAccount: [MailAccount.ID: [Conversation]],
+        accountEmails: [MailAccount.ID: String]
+    ) -> some View {
+        modifier(NewMailAnnouncer(unseen: unseen, byAccount: byAccount, accountEmails: accountEmails))
     }
 }
 
@@ -28,24 +28,32 @@ enum NewMail {
 
 private struct NewMailAnnouncer: ViewModifier {
     let unseen: Int?
-    let toAnnounce: [Conversation]?
+    let byAccount: [MailAccount.ID: [Conversation]]
+    let accountEmails: [MailAccount.ID: String]
 
-    /// What was waiting to be announced the last time it was looked at. Nil before
-    /// the first look, so mail that was already there at launch is not announced
-    /// as new.
-    @State private var knownIDs: Set<String>?
+    /// Conversations already known per account, so mail already present at launch
+    /// is never announced as new.
+    @State private var knownIDsByAccount: [MailAccount.ID: Set<String>] = [:]
 
     func body(content: Content) -> some View {
         content
             .onChange(of: unseen, initial: true) {
                 if let unseen { Self.showBadge(unseen) }
             }
-            .onChange(of: toAnnounce, initial: true) {
-                guard let toAnnounce else { return }
-                if let knownIDs {
-                    Self.notify(about: toAnnounce.filter { !knownIDs.contains($0.id) })
+            .onChange(of: byAccount, initial: true) {
+                let showsAccountLabel = accountEmails.count > 1
+                // Drop tracking for removed accounts.
+                knownIDsByAccount = knownIDsByAccount.filter { byAccount[$0.key] != nil }
+                for (accountID, conversations) in byAccount {
+                    if let known = knownIDsByAccount[accountID] {
+                        let arrivals = conversations.filter { !known.contains($0.id) }
+                        if !arrivals.isEmpty {
+                            let label = showsAccountLabel ? accountEmails[accountID] : nil
+                            Self.notify(about: arrivals, accountID: accountID, accountEmail: label)
+                        }
+                    }
+                    knownIDsByAccount[accountID] = Set(conversations.map(\.id))
                 }
-                knownIDs = Set(toAnnounce.map(\.id))
             }
     }
 
@@ -65,7 +73,7 @@ private struct NewMailAnnouncer: ViewModifier {
     /// Never says what or from whom.
     private static let log = Logger(subsystem: "app.heyday.mac", category: "notifications")
 
-    private static func notify(about arrivals: [Conversation]) {
+    private static func notify(about arrivals: [Conversation], accountID: MailAccount.ID, accountEmail: String?) {
         guard !arrivals.isEmpty else { return }
         Task {
             guard await NewMail.askToNotify() else {
@@ -76,10 +84,15 @@ private struct NewMailAnnouncer: ViewModifier {
             for conversation in arrivals {
                 let content = UNMutableNotificationContent()
                 content.title = conversation.latest.from?.displayName ?? "New email"
-                content.subtitle = conversation.subject
+                if let accountEmail {
+                    content.subtitle = "\(conversation.subject) — \(accountEmail)"
+                } else {
+                    content.subtitle = conversation.subject
+                }
                 content.body = conversation.latest.preview
                 content.sound = .default
-                try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: conversation.id, content: content, trigger: nil))
+                let identifier = "\(accountID)|\(conversation.id)"
+                try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
             }
         }
     }

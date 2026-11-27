@@ -34,9 +34,11 @@ Point Heyday at any IMAP/SMTP account — iCloud, Gmail, Fastmail, or a self-hos
 
 - **The Screener** — Every first-time sender waits for a single yes/no before reaching your mail.
 - **Mebox, The Feed, Paper Trail** — People, newsletters, and receipts separated cleanly without moving mail on the server.
+- **Set Aside & Bubble Up** — Pin conversations into a floating Set Aside pile at the bottom of Mebox, or schedule Bubble Ups (including *If no reply by…*) that float back to the top of Mebox right on time and sync across devices.
+- **Auto-Configuration, Multi-Account & OAuth 2.0 (`XOAUTH2`)** — Connect multiple accounts side-by-side with instant sidebar switching (`⌥⌘1`–`9`), a `From:` account picker when composing, combined unread badges, built-in presets (iCloud, Gmail, Outlook / Microsoft 365, Fastmail, Naver, Yahoo, Proton Mail Bridge), Thunderbird ISPDB fallback, and native PKCE OAuth 2.0 (including automatic RFC 7591 registration for Fastmail and BYO Client IDs for Google / Microsoft).
 - **Built-in Tracking Protection** — Strips tracking pixels and UTM/click-tracker parameters, flags opaque click-tracking links, and holds back per-recipient images by default.
 - **Inline Translation** — Paragraph-by-paragraph translation right inside a conversation via Google Translate, DeepL, OpenAI, Claude, Gemini, OpenRouter, or any OpenAI-compatible local model.
-- **Multi-Device Sync over IMAP** — Syncs Screener decisions, notification choices, and folder assignments across devices using your mail account itself.
+- **Multi-Device Sync over IMAP** — Syncs Screener decisions, notification choices, Bubble Ups, visit watermarks, and folder assignments across devices using your mail account itself.
 - **Native on Mac, iPhone, and iPad** — Built from system controls and SF Symbols with zero third-party packages.
 
 ---
@@ -65,9 +67,17 @@ open Heyday.xcodeproj   # then Run
 Tools/make-dmg.sh
 ```
 
-The first launch asks for your account: address, password, and the IMAP and SMTP
-servers. For Proton Mail, click **"Use Proton Mail Bridge Settings"** and copy the
-username and password from Bridge's Mailbox details. The password goes in your keychain.
+The first launch asks for your account. Typing an email address automatically fills
+IMAP and SMTP settings from built-in presets (**iCloud**, **Gmail**, **Outlook / Microsoft 365**,
+**Fastmail**, **Naver**, **Yahoo**) or Thunderbird's public ISPDB. On macOS, click
+**Proton Mail Bridge** to fill `127.0.0.1` ports `1143` / `1025`.
+
+- **Fastmail**: supports one-click OAuth 2.0 with automatic RFC 7591 client registration (no Client ID required), or an app password.
+- **Outlook / Microsoft 365**: uses OAuth 2.0 (`XOAUTH2`) with a free Microsoft Entra ID public-client Application ID (`IMAP.AccessAsUser.All`, `SMTP.Send`, `offline_access`).
+- **Gmail**: works with a Google App Password out of the box, or OAuth 2.0 (`XOAUTH2`) using your own Google Cloud Desktop Client ID.
+- **iCloud Mail**: Apple does not offer third-party IMAP OAuth, so use an Apple app-specific password.
+
+Passwords and OAuth refresh tokens are stored in your keychain.
 
 The build is signed ad hoc, so every rebuild is a different app as far as the keychain
 is concerned: after one, macOS asks again whether Heyday may read the password, and the
@@ -110,9 +120,10 @@ IMAP has folders and flags, and nothing else. The rest is this app's doing:
 | HEY | Here |
 | --- | --- |
 | The Screener | A decision per sender, kept on this Mac in `~/Library/Application Support/Heyday` and, for your other devices, in the account (see [The same on every device](#the-same-on-every-device)). An undecided sender's mail stays in your inbox on the server; the app holds it in the Screener until you say yes or no. |
-| Imbox, The Feed, Paper Trail | **Mebox**, **The Feed**, and **Paper Trail** — three views of the server's inbox, split by where each sender is delivered. Nothing is moved on the server. **The Feed** renders newsletters as an open newsfeed of cards with inline *See more…* expansion; **Paper Trail** (and The Feed) mark mail read on the server automatically and draw a *New Since You Last Visited* divider using a synced visit watermark. |
+| Mebox, The Feed, Paper Trail | Three views of the server's inbox, split by where each sender is delivered. Nothing is moved on the server. **The Feed** renders newsletters as an open newsfeed of cards with inline *See more…* expansion; **Paper Trail** (and The Feed) mark mail read on the server automatically and draw a *New Since You Last Visited* divider using a synced visit watermark. |
 | Screened Out | A fourth view of the inbox: mail from senders you said no to. Like The Feed and Paper Trail, it is marked read on the server when assigned and as more arrives, so other mail programs do not count it as new; Undo makes what your answer marked read unread again. |
-| Reply Later, Set Aside | Real mailboxes on the server, so other mail clients see them too. The app makes a folder for each the first time you use it. |
+| Reply Later, Set Aside | Real mailboxes on the server, so other mail clients see them too. The app makes a folder for each the first time you use it, and pins Set Aside conversations as a floating stacked pile at the bottom of Mebox for one-click access. |
+| Bubble Up | Scheduled reminders synced via `Heyday` state (presets, custom date/time, or *If no reply by…*). Due conversations float into a **BUBBLED UP** section at the top of Mebox with a one-click bubble badge to dismiss. |
 | Seen and unseen | The IMAP `\Seen` flag. |
 | Notifications | Off unless you ask, as in HEY: mail is announced only from a sender, or in a conversation, that you turned notifications on for. |
 
@@ -314,9 +325,9 @@ more than once or twice in a row.
 
 ## Not built yet
 
-Bubble Up, saved drafts (closing a composer window discards what is in it, after
+Saved drafts (closing a composer window discards what is in it, after
 asking), labels beyond showing them as folders, attachments in the composer, rich-text
-composing, more than one account, and showing your own sent replies inside a thread.
+composing, and showing your own sent replies inside a thread.
 There is no setting to hold every image back, or to load all of a trusted sender's
 without asking: Load as Sent is chosen one email at a time. Translation is asked for
 each time: nothing is translated as it arrives, and a translation is not kept once its

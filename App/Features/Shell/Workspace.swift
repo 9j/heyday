@@ -24,6 +24,11 @@ final class Workspace {
     let notifications: Store<NotificationsFeature>
     /// When Paper Trail and The Feed were last visited, for the "new since last visited" divider.
     let visits: Store<BoxVisitsFeature>
+    /// Scheduled and active Bubble Up reminders, synced across devices.
+    let bubbleUps: Store<BubbleUpFeature>
+    /// Advances when a scheduled Bubble Up becomes due (or when returning to the app)
+    /// so Mebox updates at the exact scheduled time without polling.
+    var bubbleUpClock = Date()
     /// The translation service and language chosen. Shared with Settings.
     let translation: Store<TranslationSettingsFeature>
     /// Keeping the Screener's decisions and the folder choices the same on every Mac.
@@ -38,6 +43,7 @@ final class Workspace {
     @ObservationIgnored private let foldersStore: JSONFileStore<FolderAssignments>
     @ObservationIgnored private var liveUpdates: Task<Void, Never>?
     @ObservationIgnored private var regularSync: Task<Void, Never>?
+    @ObservationIgnored private var bubbleUpWakeTask: Task<Void, Never>?
     /// Where the app keeps its own data in the account. Not a folder of mail.
     @ObservationIgnored private let dataMailbox: String
     @ObservationIgnored private var mailboxes: [String: Store<MailboxFeature>] = [:]
@@ -64,7 +70,8 @@ final class Workspace {
         rulesStore: JSONFileStore<SenderRules>,
         foldersStore: JSONFileStore<FolderAssignments>,
         notificationsStore: JSONFileStore<NotificationRules>,
-        visitsStore: JSONFileStore<BoxVisits>
+        visitsStore: JSONFileStore<BoxVisits>,
+        bubbleUpsStore: JSONFileStore<BubbleUpRules>
     ) {
         self.account = account
         self.directory = directory
@@ -84,6 +91,11 @@ final class Workspace {
             initialState: BoxVisitsFeature.State(),
             feature: BoxVisitsFeature(),
             runEffect: BoxVisitsFeature.effects(store: visitsStore)
+        )
+        bubbleUps = Store(
+            initialState: BubbleUpFeature.State(),
+            feature: BubbleUpFeature(),
+            runEffect: BubbleUpFeature.effects(store: bubbleUpsStore)
         )
 
         let document = MailDocumentStore<SyncedState>(
@@ -113,8 +125,10 @@ final class Workspace {
         rules.send(.loadRequested)
         notifications.send(.loadRequested)
         visits.send(.loadRequested)
+        bubbleUps.send(.loadRequested)
         syncWhenThisMacChanges()
         keepQuietMailRead()
+        observeBubbleUpSchedule()
         regularSync = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.syncInterval)
@@ -144,6 +158,7 @@ final class Workspace {
     deinit {
         liveUpdates?.cancel()
         regularSync?.cancel()
+        bubbleUpWakeTask?.cancel()
     }
 
     // MARK: Stores
@@ -241,9 +256,9 @@ final class Workspace {
     }
 
     /// A draft's own state. The window holding the draft keeps it.
-    func makeComposer(_ intent: ComposeIntent) -> Store<ComposeFeature> {
+    func makeComposer(_ intent: ComposeIntent, draft: ComposeFeature.Draft = .init()) -> Store<ComposeFeature> {
         Store(
-            initialState: ComposeFeature.State(intent: intent, sender: account.sender),
+            initialState: ComposeFeature.State(intent: intent, sender: account.sender, draft: draft),
             feature: ComposeFeature(),
             runEffect: ComposeFeature.effects(service: service)
         )
@@ -319,7 +334,53 @@ final class Workspace {
     }
 
     var meboxSections: MeboxSections {
-        MeboxSections(placed(.box(.mebox)), readThisVisit: navigation.state.readThisVisit)
+        MeboxSections(
+            placed(.box(.mebox)),
+            readThisVisit: navigation.state.readThisVisit,
+            bubbledUp: dueBubbledUpConversations
+        )
+    }
+
+    /// Conversations pinned to Set Aside, shown both in the Set Aside list and in the
+    /// floating pile at the bottom of Mebox.
+    var setAsideConversations: [Conversation] {
+        guard isSetUp(.setAside) else { return [] }
+        return conversations(for: .appFolder(.setAside))
+    }
+
+    /// Opens a Set Aside conversation directly from the floating pile.
+    func openSetAsideConversation(_ conversation: Conversation) {
+        navigation.send(.listingChosen(.appFolder(.setAside)))
+        navigation.send(.selectionChanged([conversation.id]))
+    }
+
+    /// Conversations whose Bubble Up time has arrived and whose condition still holds,
+    /// ordered most recently due first.
+    private var dueBubbledUpConversations: [Conversation] {
+        guard let rules = bubbleUps.state.rules else { return [] }
+        let now = bubbleUpClock
+        var seen = Set<Conversation.ID>()
+        var due: [(Conversation, BubbleUp)] = []
+
+        func consider(_ conversations: [Conversation]) {
+            for conversation in conversations where seen.insert(conversation.id).inserted {
+                if let entry = rules.bubbleUp(for: conversation.id), entry.isDue(for: conversation, at: now) {
+                    due.append((conversation, entry))
+                }
+            }
+        }
+
+        consider(placed(.box(.mebox)))
+        consider(Conversation.group(sortableInbox))
+        if isSetUp(.setAside) { consider(conversations(for: .appFolder(.setAside))) }
+        if isSetUp(.replyLater) { consider(conversations(for: .appFolder(.replyLater))) }
+
+        return due
+            .sorted { lhs, rhs in
+                if lhs.1.dueAt != rhs.1.dueAt { return lhs.1.dueAt > rhs.1.dueAt }
+                return lhs.1.scheduledAt > rhs.1.scheduledAt
+            }
+            .map(\.0)
     }
 
     /// Paper Trail or The Feed split into what arrived since the previous visit and
@@ -451,6 +512,11 @@ final class Workspace {
     }
 
     func move(_ conversations: [Conversation], to target: MoveTarget) {
+        if case .role(let role) = target, role == .trash || role == .spam {
+            for conversation in conversations where bubbleUp(for: conversation) != nil {
+                bubbleUps.send(.dismissed(conversation.id, at: .now))
+            }
+        }
         let ids = conversations.flatMap(\.messageIDs)
         if case .appFolder(let folder) = target, !isSetUp(folder) {
             // First use: the folder has to be made before anything can go into it.
@@ -574,6 +640,15 @@ final class Workspace {
             }
             return nil
 
+        case .bubbleUpChanged(let id, _, _, let previous):
+            if let previous {
+                bubbleUps.send(.scheduled(id, previous, at: .now))
+            } else {
+                bubbleUps.send(.dismissed(id, at: .now))
+            }
+            bubbleUpClock = .now
+            return nil
+
         case .moved(let messages, let destination):
             do throws(MailError) {
                 var copies = try await service.find(messageIDs: messages.compactMap(\.messageID), in: destination)
@@ -608,14 +683,17 @@ final class Workspace {
         guard let rules = rules.state.rules,
               let folders = appFolders.state.assignments,
               let notifications = notifications.state.rules,
-              let visits = visits.state.visits
+              let visits = visits.state.visits,
+              let bubbleUps = bubbleUps.state.rules
         else { return nil }
-        return SyncedState(rules: rules, folders: folders, notifications: notifications, visits: visits)
+        return SyncedState(rules: rules, folders: folders, notifications: notifications, visits: visits, bubbleUps: bubbleUps)
     }
 
     /// The app is in front again. Another device may have changed things meanwhile,
     /// and a phone that was put away has not been listening for new mail.
     func cameToTheFront() {
+        bubbleUpClock = .now
+        rescheduleBubbleUpWake()
         syncNow()
         inbox.send(.refreshRequested)
     }
@@ -647,6 +725,89 @@ final class Workspace {
         if let folders = state.folders { appFolders.send(.remoteArrived(folders)) }
         if let asked = state.notifications { notifications.send(.remoteArrived(asked)) }
         if let remoteVisits = state.visits { visits.send(.remoteArrived(remoteVisits)) }
+        if let remoteBubbleUps = state.bubbleUps { bubbleUps.send(.remoteArrived(remoteBubbleUps)) }
+    }
+
+    // MARK: Bubble Up
+
+    /// The active or scheduled Bubble Up on `conversation`, if any (ignoring `.ifNoReply`
+    /// reminders that were already satisfied by a newer reply).
+    func bubbleUp(for conversation: Conversation) -> BubbleUp? {
+        guard let entry = bubbleUps.state.rules?.bubbleUp(for: conversation.id),
+              !entry.isSatisfiedByReply(in: conversation)
+        else { return nil }
+        return entry
+    }
+
+    /// Whether `conversation` is currently due and floating at the top of Mebox.
+    func isBubbledUp(_ conversation: Conversation) -> Bool {
+        bubbleUp(for: conversation)?.isDue(for: conversation, at: bubbleUpClock) ?? false
+    }
+
+    /// A Bubble Up scheduled for a future time (not yet due).
+    func scheduledBubbleUp(for conversation: Conversation) -> BubbleUp? {
+        guard let entry = bubbleUp(for: conversation), !entry.isDue(for: conversation, at: bubbleUpClock) else { return nil }
+        return entry
+    }
+
+    /// Schedules (or immediately activates) a Bubble Up on `conversation`.
+    func scheduleBubbleUp(_ conversation: Conversation, dueAt: Date, condition: BubbleUp.Condition = .always) {
+        let now = Date()
+        let previous = bubbleUps.state.rules?.bubbleUp(for: conversation.id)
+        let entry = BubbleUp(
+            dueAt: dueAt,
+            condition: condition,
+            baselineMessageCount: conversation.messages.count,
+            scheduledAt: now
+        )
+        bubbleUps.send(.scheduled(conversation.id, entry, at: now))
+        bubbleUpClock = now
+        recentAction.send(.performed(.bubbleUpChanged(
+            conversation.id,
+            subject: conversation.subject,
+            entry,
+            previously: previous
+        )))
+    }
+
+    /// Pops an active Bubble Up or cancels a future scheduled one.
+    func dismissBubbleUp(for conversation: Conversation) {
+        guard let previous = bubbleUps.state.rules?.bubbleUp(for: conversation.id) else { return }
+        let now = Date()
+        bubbleUps.send(.dismissed(conversation.id, at: now))
+        bubbleUpClock = now
+        recentAction.send(.performed(.bubbleUpChanged(
+            conversation.id,
+            subject: conversation.subject,
+            nil,
+            previously: previous
+        )))
+    }
+
+    /// Observes changes to saved/synced Bubble Up rules once, re-arming the wake timer.
+    private func observeBubbleUpSchedule() {
+        withObservationTracking {
+            _ = bubbleUps.state.rules
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.observeBubbleUpSchedule() }
+        }
+        rescheduleBubbleUpWake()
+    }
+
+    /// Cancels any previous wake task and sleeps until the next future Bubble Up comes due.
+    private func rescheduleBubbleUpWake() {
+        bubbleUpWakeTask?.cancel()
+        guard let nextDue = bubbleUps.state.rules?.nextDueDate(after: Date()) else {
+            bubbleUpWakeTask = nil
+            return
+        }
+        // Cap individual sleeps to 1 hour so Mac sleep/wake drift still catches up promptly.
+        let delay = max(0.5, min(nextDue.timeIntervalSinceNow, 3600))
+        bubbleUpWakeTask = Task { [weak self] in
+            guard (try? await Task.sleep(for: .seconds(delay))) != nil else { return }
+            self?.bubbleUpClock = Date()
+            self?.rescheduleBubbleUpWake()
+        }
     }
 
     // MARK: Notifications
@@ -690,6 +851,7 @@ final class Workspace {
             ?? appFolders.state.storageProblem
             ?? notifications.state.storageProblem
             ?? visits.state.storageProblem
+            ?? bubbleUps.state.storageProblem
     }
 
     func dismissStorageProblem() {
@@ -697,6 +859,7 @@ final class Workspace {
         appFolders.send(.storageProblemDismissed)
         notifications.send(.storageProblemDismissed)
         visits.send(.storageProblemDismissed)
+        bubbleUps.send(.storageProblemDismissed)
     }
 }
 

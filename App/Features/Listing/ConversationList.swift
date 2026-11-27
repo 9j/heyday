@@ -5,6 +5,7 @@ import SwiftUI
 struct ConversationSection: Identifiable {
     enum Header: Equatable {
         case title(String)
+        case bubbledUp
         case newSinceLastVisited
     }
 
@@ -32,6 +33,7 @@ struct ConversationSection: Identifiable {
     var id: String {
         switch header {
         case .title(let text): "title:\(text)"
+        case .bubbledUp: "bubbledUp"
         case .newSinceLastVisited: "newSinceLastVisited"
         case nil: ""
         }
@@ -89,6 +91,13 @@ struct ConversationList<Footer: View>: View {
         switch header {
         case .title(let text):
             SectionTitle(text: text)
+        case .bubbledUp:
+            BubbledUpSectionHeader()
+                #if !os(macOS)
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 2, trailing: 16))
+                #endif
+                .listRowSeparator(.hidden)
+                .selectionDisabled()
         case .newSinceLastVisited:
             NewSinceLastVisitedDivider()
                 #if !os(macOS)
@@ -106,6 +115,9 @@ struct ConversationList<Footer: View>: View {
                 conversation: conversation,
                 showsRecipient: showsRecipient,
                 showsUnreadIndicator: showsUnreadIndicator,
+                isBubbledUp: workspace.isBubbledUp(conversation),
+                scheduledBubbleUp: workspace.scheduledBubbleUp(for: conversation),
+                onDismissBubbleUp: { workspace.dismissBubbleUp(for: conversation) },
                 quickActions: QuickAction.all(for: conversation, in: workspace)
             )
             .listRowSeparator(conversation.id == lastID ? .hidden : .automatic, edges: .bottom)
@@ -154,6 +166,25 @@ private struct SectionTitle: View {
             .listRowSeparator(.hidden)
             .selectionDisabled()
             .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Marks the BUBBLED UP section at the top of Mebox with a crisp accent rule.
+private struct BubbledUpSectionHeader: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("BUBBLED UP")
+                .font(.caption.weight(.bold))
+                .tracking(0.7)
+                .foregroundStyle(.primary)
+            Rectangle()
+                .fill(Color.accentColor.opacity(0.55))
+                .frame(height: 1.5)
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -295,6 +326,9 @@ struct ConversationRow: View {
     let conversation: Conversation
     var showsRecipient = false
     var showsUnreadIndicator = true
+    var isBubbledUp = false
+    var scheduledBubbleUp: BubbleUp? = nil
+    var onDismissBubbleUp: (() -> Void)? = nil
     var quickActions: [QuickAction] = []
 
     @State private var isUnderPointer = false
@@ -327,7 +361,7 @@ struct ConversationRow: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(who)
                         .font(.headline)
-                        .fontWeight(isUnread ? .semibold : .regular)
+                        .fontWeight(isUnread || isBubbledUp ? .semibold : .regular)
                         .lineLimit(1)
                     if conversation.messages.count > 1 {
                         Text(String(conversation.messages.count))
@@ -339,20 +373,37 @@ struct ConversationRow: View {
                             .accessibilityLabel("\(conversation.messages.count) messages")
                     }
                     Spacer(minLength: 8)
-                    HStack(spacing: 4) {
+                    HStack(spacing: 5) {
                         if conversation.hasAttachments {
                             Image(systemName: "paperclip")
                                 .font(.caption)
                                 .accessibilityLabel("Has attachments")
                         }
-                        if let date = conversation.latest.date {
-                            Text(ThreadTimestamp.text(for: date, now: .now, calendar: .current, locale: .current))
-                                .font(.subheadline)
+                        if !isBubbledUp {
+                            if let scheduled = scheduledBubbleUp {
+                                HStack(spacing: 3) {
+                                    Image(systemName: scheduled.condition == .ifNoReply ? "hourglass" : "bubbles.and.sparkles")
+                                        .font(.caption2)
+                                    Text(BubbleUpSchedule.shortLabel(for: scheduled.dueAt, now: .now, calendar: .current, locale: .current))
+                                        .font(.caption)
+                                }
+                                .foregroundStyle(Color.accentColor)
+                                .help("Bubbles up \(scheduled.dueAt.formatted(date: .abbreviated, time: .shortened))")
+                            } else if let date = conversation.latest.date {
+                                Text(ThreadTimestamp.text(for: date, now: .now, calendar: .current, locale: .current))
+                                    .font(.subheadline)
+                            }
                         }
                     }
                     .foregroundStyle(.secondary)
                     // The quick actions take this corner while the pointer is on the row.
                     .opacity(showsQuickActions ? 0 : 1)
+
+                    if isBubbledUp {
+                        BubbleBadgeButton {
+                            onDismissBubbleUp?()
+                        }
+                    }
                 }
                 Text(conversation.subject.isEmpty ? "(No Subject)" : conversation.subject)
                     .font(.subheadline)
@@ -370,10 +421,13 @@ struct ConversationRow: View {
         .motion(Motion.response, value: isUnread)
         .accessibilityElement(children: .combine)
         .accessibilityValue(isUnread ? "Unread" : "")
+        .accessibilityAction(named: isBubbledUp ? "Dismiss Bubble Up" : "") {
+            if isBubbledUp { onDismissBubbleUp?() }
+        }
         .overlay(alignment: .topTrailing) {
             if showsQuickActions {
                 QuickActionBar(actions: quickActions)
-                    .offset(y: -2)
+                    .offset(x: isBubbledUp ? -24 : 0, y: -2)
                     .transition(.opacity)
             }
         }
@@ -392,6 +446,40 @@ struct ConversationRow: View {
         }
         let names = conversation.senders.map(\.displayName)
         return names.isEmpty ? "Unknown Sender" : names.joined(separator: ", ")
+    }
+}
+
+/// Clickable glossy blue bubble on a row in BUBBLED UP; clicking pops/dismisses it.
+private struct BubbleBadgeButton: View {
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(red: 0.12, green: 0.56, blue: 0.98), Color(red: 0.08, green: 0.39, blue: 0.92)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                Circle()
+                    .trim(from: 0.56, to: 0.72)
+                    .stroke(.white.opacity(0.85), style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                    .padding(3)
+            }
+            .frame(width: 16, height: 16)
+            .scaleEffect(isHovering ? 1.15 : 1)
+            .motion(Motion.response, value: isHovering)
+            .padding(2)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help("Dismiss Bubble Up")
+        .accessibilityLabel("Dismiss Bubble Up")
     }
 }
 

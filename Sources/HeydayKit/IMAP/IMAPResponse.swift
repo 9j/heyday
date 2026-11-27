@@ -129,8 +129,8 @@ enum IMAPStatus: String, Sendable {
 
 /// One response from the server, reduced to what this client acts on.
 enum IMAPResponse: Equatable, Sendable {
-    /// `+ …`: the server is ready for the rest of a command.
-    case continuation
+    /// `+ …`: the server is ready for the rest of a command, or sends a SASL challenge.
+    case continuation(String)
     case tagged(tag: String, status: IMAPStatus, text: String)
     /// An untagged status line, such as the greeting or `* OK [UIDNEXT 42]`.
     case status(IMAPStatus, text: String)
@@ -146,7 +146,7 @@ enum IMAPResponse: Equatable, Sendable {
     init(_ data: Data) throws(IMAPSyntaxError) {
         let (head, afterHead) = Self.word(data)
         if head == "+" {
-            self = .continuation
+            self = .continuation(String(decoding: afterHead, as: UTF8.self))
             return
         }
         guard head == "*" else {
