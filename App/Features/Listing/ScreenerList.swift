@@ -9,6 +9,7 @@ struct ScreenerList<Footer: View>: View {
 
     var body: some View {
         let waiting = workspace.waitingSenders
+        let waitingIDs = waiting.map(\.id)
         List(selection: workspace.listSelection) {
             ForEach(waiting) { entry in
                 ScreenerRow(entry: entry) { workspace.decide($0, for: entry.sender) }
@@ -32,7 +33,8 @@ struct ScreenerList<Footer: View>: View {
         .listStyle(.plain)
         #endif
         // An answered sender's row closes up behind them.
-        .motion(Motion.layout, value: waiting.map(\.id))
+        .motion(Motion.layout, value: waitingIDs)
+        .keepsMacListRowHeights(when: waitingIDs)
     }
 }
 

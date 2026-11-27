@@ -15,13 +15,22 @@ struct MainView: View {
 
     private var navigation: Store<NavigationFeature> { workspace.navigation }
 
+    /// The Feed fills the whole window beside the sidebar while browsing its cards,
+    /// and restores the 3-column split when opening a full thread or leaving The Feed.
+    private var isFeedStream: Bool {
+        navigation.state.search == nil
+            && navigation.state.listing == .box(.feed)
+            && navigation.state.selection.isEmpty
+    }
+
     var body: some View {
         NavigationSplitView {
             SidebarView(workspace: workspace)
                 .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 300)
         } content: {
             ConversationColumn(workspace: workspace)
-                .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: 520)
+                .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: isFeedStream ? nil : 520)
+                .collapsesMacDetailColumn(isFeedStream)
                 .toolbar { composeToolbar }
         } detail: {
             DetailColumn(workspace: workspace)
@@ -149,12 +158,19 @@ private struct ConversationColumn: View {
 private struct DetailColumn: View {
     let workspace: Workspace
 
+    @Environment(\.horizontalSizeClass) private var widthClass
+
     private var isScreening: Bool {
         workspace.navigation.state.search == nil && workspace.navigation.state.listing == .screener
     }
 
+    private var isFeed: Bool {
+        workspace.navigation.state.search == nil && workspace.navigation.state.listing == .box(.feed)
+    }
+
     var body: some View {
         let selected = workspace.selectedConversations
+        let isCollapsedFeed = isFeed && selected.isEmpty
         Group {
             if selected.count > 1 {
                 ContentUnavailableView("\(selected.count) Conversations Selected", systemImage: "square.stack")
@@ -168,12 +184,38 @@ private struct DetailColumn: View {
                         }
                     }
                     .id(ThreadRef(conversation))
+            } else if isFeed, showsFeedInDetail {
+                FeedView(workspace: workspace) {}
             } else {
                 ContentUnavailableView("No Conversation Selected", systemImage: "envelope.open")
             }
         }
         .toolbar {
-            ConversationToolbar(workspace: workspace, conversations: selected)
+            #if os(macOS)
+            if isFeed && !selected.isEmpty {
+                ToolbarItem(placement: .navigation) {
+                    Button("Back to The Feed", systemImage: "chevron.left") {
+                        workspace.navigation.send(.selectionChanged([]))
+                    }
+                    .help("Back to The Feed")
+                }
+            }
+            if !isCollapsedFeed {
+                ConversationToolbar(workspace: workspace, conversations: selected)
+            }
+            #else
+            if !(isFeed && selected.isEmpty) {
+                ConversationToolbar(workspace: workspace, conversations: selected)
+            }
+            #endif
         }
+    }
+
+    private var showsFeedInDetail: Bool {
+        #if os(macOS)
+        false
+        #else
+        widthClass == .regular
+        #endif
     }
 }

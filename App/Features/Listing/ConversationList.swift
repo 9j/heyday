@@ -1,16 +1,41 @@
 import HeydayKit
 import SwiftUI
 
-/// A titled run of conversations in a list. A list with one untitled section is a
-/// plain list.
+/// A run of conversations in a list. A list with one untitled section is a plain list.
 struct ConversationSection: Identifiable {
-    let title: String?
+    enum Header: Equatable {
+        case title(String)
+        case newSinceLastVisited
+    }
+
+    let header: Header?
     let conversations: [Conversation]
     /// Shown in place of the section when it has no conversations. Without one, an
-    /// empty section is left out.
+    /// empty section is left out unless `showsHeaderWhenEmpty` is true.
     var emptyNote: String?
+    /// Keeps a divider header visible even when no older conversations follow it.
+    var showsHeaderWhenEmpty = false
 
-    var id: String { title ?? "" }
+    init(
+        title: String? = nil,
+        header: Header? = nil,
+        conversations: [Conversation],
+        emptyNote: String? = nil,
+        showsHeaderWhenEmpty: Bool = false
+    ) {
+        self.header = header ?? title.map(Header.title)
+        self.conversations = conversations
+        self.emptyNote = emptyNote
+        self.showsHeaderWhenEmpty = showsHeaderWhenEmpty
+    }
+
+    var id: String {
+        switch header {
+        case .title(let text): "title:\(text)"
+        case .newSinceLastVisited: "newSinceLastVisited"
+        case nil: ""
+        }
+    }
 }
 
 /// A selectable list of conversations. A row can be acted on without opening it:
@@ -21,20 +46,27 @@ struct ConversationList<Footer: View>: View {
     let workspace: Workspace
     /// In Sent the interesting party is who it went to, not who wrote it.
     var showsRecipient = false
+    /// Quiet boxes (Paper Trail, Screened Out) are kept read automatically and omit
+    /// the unread dot and bold unread styling.
+    var showsUnreadIndicator = true
     @ViewBuilder var footer: Footer
 
     var body: some View {
+        let rowIDs = sections.map { $0.conversations.map(\.id) }
         List(selection: workspace.listSelection) {
-            ForEach(sections) { section in
+            ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
+                let followedByDivider = sections.indices.contains(index + 1) && sections[index + 1].header == .newSinceLastVisited
                 if section.conversations.isEmpty {
                     if let note = section.emptyNote {
                         EmptySectionNote(text: note)
+                    } else if section.showsHeaderWhenEmpty, let header = section.header {
+                        sectionHeader(header)
                     }
                 } else {
-                    if let title = section.title {
-                        SectionTitle(text: title)
+                    if let header = section.header {
+                        sectionHeader(header)
                     }
-                    rows(section.conversations)
+                    rows(section.conversations, hidesLastBottomSeparator: followedByDivider)
                 }
             }
             footer
@@ -47,17 +79,36 @@ struct ConversationList<Footer: View>: View {
         .environment(\.defaultMinListRowHeight, 1)
         #endif
         // Rows that come, go or change section travel to where they belong.
-        .motion(Motion.layout, value: sections.map { $0.conversations.map(\.id) })
+        .motion(Motion.layout, value: rowIDs)
+        .keepsMacListRowHeights(when: rowIDs)
         .conversationActions(workspace: workspace)
     }
 
-    private func rows(_ conversations: [Conversation]) -> some View {
-        ForEach(conversations) { conversation in
+    @ViewBuilder
+    private func sectionHeader(_ header: ConversationSection.Header) -> some View {
+        switch header {
+        case .title(let text):
+            SectionTitle(text: text)
+        case .newSinceLastVisited:
+            NewSinceLastVisitedDivider()
+                #if !os(macOS)
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                #endif
+                .listRowSeparator(.hidden)
+                .selectionDisabled()
+        }
+    }
+
+    private func rows(_ conversations: [Conversation], hidesLastBottomSeparator: Bool) -> some View {
+        let lastID = hidesLastBottomSeparator ? conversations.last?.id : nil
+        return ForEach(conversations) { conversation in
             ConversationRow(
                 conversation: conversation,
                 showsRecipient: showsRecipient,
+                showsUnreadIndicator: showsUnreadIndicator,
                 quickActions: QuickAction.all(for: conversation, in: workspace)
             )
+            .listRowSeparator(conversation.id == lastID ? .hidden : .automatic, edges: .bottom)
             .swipeActions(edge: .trailing) {
                 if workspace.canMove([conversation], to: .role(.archive)) {
                     Button("Archive", systemImage: "archivebox") { workspace.move([conversation], to: .role(.archive)) }
@@ -103,6 +154,48 @@ private struct SectionTitle: View {
             .listRowSeparator(.hidden)
             .selectionDisabled()
             .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Marks the boundary between what arrived since the previous visit and what was
+/// already in Paper Trail or The Feed then.
+struct NewSinceLastVisitedDivider: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            SquiggleWave()
+                .stroke(Color.accentColor.opacity(0.75), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                .frame(width: 48, height: 6)
+                .accessibilityHidden(true)
+            Text("NEW SINCE YOU LAST VISITED")
+                .font(.caption2.weight(.semibold))
+                .tracking(0.6)
+                .foregroundStyle(Color.accentColor.opacity(0.9))
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+private struct SquiggleWave: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let waves = 3.5
+        let steps = 40
+        let midY = rect.midY
+        let amplitude = rect.height * 0.42
+        for step in 0...steps {
+            let progress = Double(step) / Double(steps)
+            let x = rect.minX + rect.width * progress
+            let y = midY + sin(progress * waves * 2 * .pi) * amplitude
+            if step == 0 {
+                path.move(to: CGPoint(x: x, y: y))
+            } else {
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+        }
+        return path
     }
 }
 
@@ -201,6 +294,7 @@ struct QuickAction: Identifiable {
 struct ConversationRow: View {
     let conversation: Conversation
     var showsRecipient = false
+    var showsUnreadIndicator = true
     var quickActions: [QuickAction] = []
 
     @State private var isUnderPointer = false
@@ -214,18 +308,20 @@ struct ConversationRow: View {
         #endif
     }
 
-    private var isUnread: Bool { !conversation.isSeen }
+    private var isUnread: Bool { showsUnreadIndicator && !conversation.isSeen }
     private var showsQuickActions: Bool { isUnderPointer && !quickActions.isEmpty }
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Circle()
-                .fill(.tint)
-                .frame(width: 8, height: 8)
-                .scaleEffect(isUnread ? 1 : 0.4)
-                .opacity(isUnread ? 1 : 0)
-                .frame(height: avatarSize)
-                .accessibilityHidden(true)
+            if showsUnreadIndicator {
+                Circle()
+                    .fill(.tint)
+                    .frame(width: 8, height: 8)
+                    .scaleEffect(isUnread ? 1 : 0.4)
+                    .opacity(isUnread ? 1 : 0)
+                    .frame(height: avatarSize)
+                    .accessibilityHidden(true)
+            }
             AvatarView(address: correspondent, size: avatarSize)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {

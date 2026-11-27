@@ -39,12 +39,22 @@ struct MessageBodyView: View {
     var onOpenLink: (URL) -> Void = { _ in }
     /// Receives the email's paragraphs when a translation waits for them.
     var onParagraphs: ([String]) -> Void = { _ in }
+    /// Caps the web view's own frame height (used by The Feed card preview) so an
+    /// overflowing WKWebView never steals clicks from controls beneath it.
+    var maxHeight: CGFloat? = nil
+    /// Reports the full unclipped rendered height once measured.
+    var onContentHeight: ((CGFloat) -> Void)? = nil
 
     /// The page's height, once it has reported one.
     @State private var contentHeight: CGFloat?
 
     /// Room for the lines that stand in for an email not yet laid out.
     private static let waitingHeight: CGFloat = 76
+
+    private var displayedHeight: CGFloat {
+        let measured = contentHeight ?? Self.waitingHeight
+        return maxHeight.map { min(measured, $0) } ?? measured
+    }
 
     var body: some View {
         MessageWebView(
@@ -59,7 +69,7 @@ struct MessageBodyView: View {
             onParagraphs: onParagraphs,
             contentHeight: $contentHeight
         )
-        .frame(height: contentHeight ?? Self.waitingHeight)
+        .frame(height: displayedHeight)
         .opacity(contentHeight == nil ? 0 : 1)
         .overlay(alignment: .topLeading) {
             if contentHeight == nil {
@@ -67,7 +77,10 @@ struct MessageBodyView: View {
                     .transition(.opacity)
             }
         }
-        .motion(Motion.layout, value: contentHeight)
+        .onChange(of: contentHeight) { _, height in
+            if let height { onContentHeight?(height) }
+        }
+        .motion(Motion.layout, value: displayedHeight)
     }
 }
 

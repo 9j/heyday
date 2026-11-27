@@ -625,3 +625,64 @@ private func folders(_ assignments: (MailboxDirectory.AppFolder, String?, TimeIn
         #expect(feature.reduce(&state, .remoteArrived(remote)).isEmpty)
     }
 }
+
+@Suite struct BoxVisitsTests {
+    @Test func markVisitedAdvancesMonotonicallyAndMergesByLatestTime() {
+        var here = BoxVisits()
+        here.markVisited(.paperTrail, at: start.addingTimeInterval(60.7))
+        // An older timestamp must not move the watermark backward.
+        here.markVisited(.paperTrail, at: start.addingTimeInterval(10))
+        #expect(here.lastVisited(.paperTrail) == start.addingTimeInterval(60))
+        #expect(here.lastVisited(.feed) == nil)
+
+        var there = BoxVisits()
+        there.markVisited(.paperTrail, at: start.addingTimeInterval(180))
+        there.markVisited(.feed, at: start.addingTimeInterval(30))
+
+        let merged = here.merged(with: there)
+        #expect(merged.lastVisited(.paperTrail) == start.addingTimeInterval(180))
+        #expect(merged.lastVisited(.feed) == start.addingTimeInterval(30))
+        #expect(merged == there.merged(with: here))
+        #expect(merged.merged(with: here) == merged)
+    }
+
+    @Test func visitsTravelWithSyncedStateAndStayCompatibleWithOlderCopies() {
+        var visited = BoxVisits()
+        visited.markVisited(.paperTrail, at: start.addingTimeInterval(120))
+        let here = SyncedState(rules: rules(), folders: FolderAssignments(), visits: BoxVisits())
+        let there = SyncedState(rules: rules(), folders: FolderAssignments(), visits: visited)
+
+        #expect(here.merged(with: there).visits == visited)
+        #expect(there.merged(with: SyncedState(rules: rules(), folders: nil)).visits == visited)
+    }
+}
+
+@Suite struct BoxVisitsFeatureTests {
+    private let feature = BoxVisitsFeature()
+
+    private var loaded: BoxVisitsFeature.State {
+        var state = BoxVisitsFeature.State()
+        _ = feature.reduce(&state, .loaded(nil))
+        return state
+    }
+
+    @Test func visitingAdvancesAndSavesOnlyWhenNewer() {
+        var state = loaded
+
+        let first = feature.reduce(&state, .visited(.paperTrail, at: start.addingTimeInterval(60)))
+        #expect(first == state.visits.map { [.save($0)] })
+
+        // Same or older timestamp does not rewrite disk or trigger sync.
+        #expect(feature.reduce(&state, .visited(.paperTrail, at: start.addingTimeInterval(60))).isEmpty)
+        #expect(feature.reduce(&state, .visited(.paperTrail, at: start.addingTimeInterval(30))).isEmpty)
+    }
+
+    @Test func remoteVisitsMergeAndSaveOnlyWhenNewer() {
+        var state = loaded
+        var remote = BoxVisits()
+        remote.markVisited(.feed, at: start.addingTimeInterval(90))
+
+        #expect(feature.reduce(&state, .remoteArrived(remote)) == [.save(remote)])
+        #expect(feature.reduce(&state, .remoteArrived(remote)).isEmpty)
+    }
+}

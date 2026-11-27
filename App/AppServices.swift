@@ -65,7 +65,8 @@ final class AppServices {
             translationTransport: URLSessionTransport(),
             rulesStore: JSONFileStore(url: Self.supportDirectory.appending(path: "rules-\(account.sender.key).json")),
             foldersStore: JSONFileStore(url: Self.supportDirectory.appending(path: "folders-\(account.sender.key).json")),
-            notificationsStore: JSONFileStore(url: Self.supportDirectory.appending(path: "notifications-\(account.sender.key).json"))
+            notificationsStore: JSONFileStore(url: Self.supportDirectory.appending(path: "notifications-\(account.sender.key).json")),
+            visitsStore: JSONFileStore(url: Self.supportDirectory.appending(path: "visits-\(account.sender.key).json"))
         )
     }
 

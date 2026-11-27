@@ -26,6 +26,15 @@ public enum Destination: String, Codable, Hashable, Sendable, CaseIterable {
 public enum SenderDecision: Codable, Hashable, Sendable {
     case approved(Destination)
     case screenedOut
+
+    /// Whether giving a sender this answer keeps their mail read on the server,
+    /// so it never adds to an unread count in Heyday or another mail client.
+    public var marksMailRead: Bool {
+        switch self {
+        case .approved(.feed), .approved(.paperTrail), .screenedOut: true
+        case .approved(.mebox): false
+        }
+    }
 }
 
 /// Where a message belongs, given who sent it.
@@ -34,6 +43,15 @@ public enum Placement: Hashable, Sendable {
     /// Nobody has said yet whether this sender may email you.
     case screener
     case screenedOut
+
+    /// Whether mail placed here is kept read on the server: The Feed, Paper Trail,
+    /// and Screened Out never count as unread; Mebox and the Screener do.
+    public var isKeptRead: Bool {
+        switch self {
+        case .box(.feed), .box(.paperTrail), .screenedOut: true
+        case .box(.mebox), .screener: false
+        }
+    }
 }
 
 /// A sender waiting in the Screener, with what they have sent since it started.
@@ -125,10 +143,10 @@ public struct SenderRules: Codable, Equatable, Sendable {
         Conversation.group(messages.filter { self.placement(for: $0) == placement })
     }
 
-    /// The unread mail of senders who were screened out. It is never new to the
-    /// person, so it is marked read on the server, where every mail program sees it.
-    public func unreadScreenedOut(in messages: [MessageSummary]) -> [MessageSummary.ID] {
-        messages.filter { !$0.isSeen && placement(for: $0) == .screenedOut }.map(\.id)
+    /// Unread mail in boxes that are kept read on the server (The Feed, Paper Trail,
+    /// and Screened Out), so every mail program sees them as read too.
+    public func unreadKeptRead(in messages: [MessageSummary]) -> [MessageSummary.ID] {
+        messages.filter { !$0.isSeen && placement(for: $0).isKeptRead }.map(\.id)
     }
 
     /// Everyone waiting in the Screener, the most recent to write first.

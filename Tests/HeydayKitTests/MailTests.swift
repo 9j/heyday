@@ -97,22 +97,29 @@ private func message(
         #expect(waiting[0].conversations.flatMap(\.messageIDs).map(\.uid).sorted() == [4, 9])
     }
 
-    @Test func onlyTheUnreadMailOfScreenedOutSendersIsToBeMarkedRead() {
+    @Test func unreadMailInFeedPaperTrailAndScreenedOutIsMarkedRead() {
         var rules = rules
         rules.decide(.screenedOut, for: stranger, at: screeningStart)
         let newcomer = EmailAddress(address: "newcomer@example.com")
         let inbox = [
+            message(8, from: news, seen: false),
+            message(7, from: shop, seen: false),
             message(6, from: stranger, seen: false),
             message(5, from: stranger, seen: true),
             // Mail that was there before the Screener started is screened out with its sender.
             message(4, from: stranger, seen: false, arrived: -60),
+            // Mebox stays unread until the person opens it.
             message(3, from: jane, seen: false),
             // Mail waiting in the Screener stays unread, so it is new if its sender is let in.
             message(2, from: newcomer, seen: false),
             message(1, from: nil, seen: false),
         ]
 
-        #expect(rules.unreadScreenedOut(in: inbox).map(\.uid) == [6, 4])
+        #expect(rules.unreadKeptRead(in: inbox).map(\.uid) == [8, 7, 6, 4])
+        #expect(SenderDecision.approved(.feed).marksMailRead)
+        #expect(SenderDecision.approved(.paperTrail).marksMailRead)
+        #expect(SenderDecision.screenedOut.marksMailRead)
+        #expect(!SenderDecision.approved(.mebox).marksMailRead)
     }
 
     @Test func rulesSurviveBeingSavedAndLoaded() throws {

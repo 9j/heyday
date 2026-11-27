@@ -22,6 +22,8 @@ final class Workspace {
     let rules: Store<RulesFeature>
     /// Which senders and conversations the person asked to be told about.
     let notifications: Store<NotificationsFeature>
+    /// When Paper Trail and The Feed were last visited, for the "new since last visited" divider.
+    let visits: Store<BoxVisitsFeature>
     /// The translation service and language chosen. Shared with Settings.
     let translation: Store<TranslationSettingsFeature>
     /// Keeping the Screener's decisions and the folder choices the same on every Mac.
@@ -42,12 +44,14 @@ final class Workspace {
     @ObservationIgnored private var appFoldersStore: Store<AppFoldersFeature>?
     /// The search on screen. Only one is kept: a new query replaces it.
     @ObservationIgnored private var currentSearch: (query: String, store: Store<SearchFeature>)?
+    /// Loaded thread stores kept for The Feed so scrolling back does not re-fetch bodies.
+    @ObservationIgnored private var feedThreads: [ThreadRef: Store<ThreadFeature>] = [:]
     /// The moves the server has yet to answer for, oldest first.
     @ObservationIgnored private var movesAwaitingAnswer: [PendingMove] = []
-    /// Screened-out mail this device has asked the server to mark read. Each message is
-    /// asked about once while the app runs: a refusal is not retried over and over,
-    /// and one the person marks unread again is left so.
-    @ObservationIgnored private var markedReadAsScreenedOut: Set<MessageSummary.ID> = []
+    /// Quiet-box mail (The Feed, Paper Trail, Screened Out) this device has asked
+    /// the server to mark read. Each message is asked about once while the app runs:
+    /// a refusal is not retried over and over, and one marked unread by hand stays so.
+    @ObservationIgnored private var markedReadAutomatically: Set<MessageSummary.ID> = []
 
     init(
         account: MailAccount,
@@ -59,7 +63,8 @@ final class Workspace {
         translationTransport: any HTTPTransport,
         rulesStore: JSONFileStore<SenderRules>,
         foldersStore: JSONFileStore<FolderAssignments>,
-        notificationsStore: JSONFileStore<NotificationRules>
+        notificationsStore: JSONFileStore<NotificationRules>,
+        visitsStore: JSONFileStore<BoxVisits>
     ) {
         self.account = account
         self.directory = directory
@@ -74,6 +79,11 @@ final class Workspace {
             initialState: NotificationsFeature.State(),
             feature: NotificationsFeature(),
             runEffect: NotificationsFeature.effects(store: notificationsStore) { await NewMail.askToNotify() }
+        )
+        visits = Store(
+            initialState: BoxVisitsFeature.State(),
+            feature: BoxVisitsFeature(),
+            runEffect: BoxVisitsFeature.effects(store: visitsStore)
         )
 
         let document = MailDocumentStore<SyncedState>(
@@ -102,8 +112,9 @@ final class Workspace {
 
         rules.send(.loadRequested)
         notifications.send(.loadRequested)
+        visits.send(.loadRequested)
         syncWhenThisMacChanges()
-        keepScreenedOutMailRead()
+        keepQuietMailRead()
         regularSync = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.syncInterval)
@@ -186,6 +197,21 @@ final class Workspace {
             feature: ThreadFeature(),
             runEffect: ThreadFeature.effects(service: service, images: imageLoader)
         )
+    }
+
+    /// The cached thread store for a card in The Feed, starting its load once so
+    /// scrolling back past a newsletter does not fetch its body from the server again.
+    func feedThread(for conversation: Conversation) -> Store<ThreadFeature> {
+        let ref = ThreadRef(conversation)
+        if let cached = feedThreads[ref] { return cached }
+        if feedThreads.count >= 50 {
+            let visible = Set(placed(.box(.feed)).prefix(40).map(ThreadRef.init))
+            feedThreads = feedThreads.filter { visible.contains($0.key) }
+        }
+        let store = makeThread(ref)
+        feedThreads[ref] = store
+        store.send(.opened)
+        return store
     }
 
     /// The translations of one open conversation. The view showing it keeps them.
@@ -294,6 +320,31 @@ final class Workspace {
 
     var meboxSections: MeboxSections {
         MeboxSections(placed(.box(.mebox)), readThisVisit: navigation.state.readThisVisit)
+    }
+
+    /// Paper Trail or The Feed split into what arrived since the previous visit and
+    /// what was already there then.
+    func visitedBoxSections(for destination: Destination) -> VisitedBoxSections {
+        let conversations = placed(.box(destination))
+        let cutoff: Date? = switch navigation.state.visitCutoff {
+        case .captured(let date): date
+        case .pending: visits.state.visits?.lastVisited(destination)
+        }
+        return VisitedBoxSections(conversations, lastVisited: cutoff)
+    }
+
+    /// Captures the previous-visit watermark for this visit (once per visit) and
+    /// advances the saved watermark so the next visit knows what was seen now.
+    func noteVisited(_ destination: Destination) {
+        guard let saved = visits.state.visits,
+              rules.state.rules != nil,
+              case .loaded = inbox.state.content
+        else { return }
+        if navigation.state.visitCutoff == .pending {
+            navigation.send(.visitCutoffCaptured(saved.lastVisited(destination)))
+        }
+        let watermark = VisitedBoxSections.watermark(for: placed(.box(destination)), now: .now)
+        visits.send(.visited(destination, at: watermark))
     }
 
     /// Senders waiting for a yes or no, the most recent to write first.
@@ -457,39 +508,39 @@ final class Workspace {
     func decide(_ decision: SenderDecision, for sender: EmailAddress) {
         let previous = rules.state.rules?.decision(for: sender)
         guard decision != previous else { return }
-        // A screened-out sender's mail is never new: what of it is unread is marked
-        // read now, and noted, so that taking the answer back undoes that too.
-        let markedRead = decision == .screenedOut ? unreadMail(from: sender) : []
+        // Feed, Paper Trail, and Screened Out mail never counts as unread: mark what
+        // was unread as read now, and note it so taking the answer back undoes that too.
+        let markedRead = decision.marksMailRead ? unreadMail(from: sender) : []
         changingTheList {
             rules.send(.decided(decision, for: sender, at: .now))
         }
-        markReadAsScreenedOut(markedRead)
+        markReadAutomatically(markedRead)
         recentAction.send(.performed(.senderDecided(sender, decision, previously: previous, markedRead: markedRead)))
     }
 
-    // MARK: Screened-out mail is read
+    // MARK: Quiet mail is kept read
 
-    /// Keeps the mail of screened-out senders read on the server: as it arrives, when
-    /// another device's answers are taken in, and for mail already there. Looks now,
-    /// and again after every change to the inbox or to the answers.
-    private func keepScreenedOutMailRead() {
+    /// Keeps The Feed, Paper Trail, and Screened Out mail read on the server: as it
+    /// arrives, when another device's answers are taken in, and for mail already
+    /// there. Looks now, and again after every change to the inbox or to the answers.
+    private func keepQuietMailRead() {
         let unread = withObservationTracking {
             guard let rules = rules.state.rules, case .loaded = inbox.state.content else { return [MessageSummary.ID]() }
-            return rules.unreadScreenedOut(in: sortableInbox)
+            return rules.unreadKeptRead(in: sortableInbox)
         } onChange: { [weak self] in
             // Called just before the change; look again once it has been made.
-            Task { @MainActor in self?.keepScreenedOutMailRead() }
+            Task { @MainActor in self?.keepQuietMailRead() }
         }
-        markReadAsScreenedOut(unread)
+        markReadAutomatically(unread)
     }
 
-    /// Asks the server to mark screened-out mail read, each message once.
-    private func markReadAsScreenedOut(_ ids: [MessageSummary.ID]) {
-        let fresh = ids.filter { !markedReadAsScreenedOut.contains($0) }
+    /// Asks the server to mark quiet-box mail read, each message once.
+    private func markReadAutomatically(_ ids: [MessageSummary.ID]) {
+        let fresh = ids.filter { !markedReadAutomatically.contains($0) }
         guard !fresh.isEmpty else { return }
-        markedReadAsScreenedOut.formUnion(fresh)
+        markedReadAutomatically.formUnion(fresh)
         inbox.send(.seenChangeRequested(true, ids: fresh))
-        Self.screenerLog.info("Marked \(fresh.count, privacy: .public) screened-out messages read")
+        Self.screenerLog.info("Marked \(fresh.count, privacy: .public) quiet-box messages read")
     }
 
     /// A sender's unread mail, among what the boxes and the Screener share out.
@@ -516,9 +567,9 @@ final class Workspace {
                 }
             }
             // What the answer marked read is unread again, as it was before it. Should
-            // the sender be screened out once more, it is marked read once more.
+            // the sender be placed in a quiet box again, it is marked read once more.
             if !markedRead.isEmpty {
-                markedReadAsScreenedOut.subtract(markedRead)
+                markedReadAutomatically.subtract(markedRead)
                 inbox.send(.seenChangeRequested(false, ids: markedRead))
             }
             return nil
@@ -556,9 +607,10 @@ final class Workspace {
     private var syncedState: SyncedState? {
         guard let rules = rules.state.rules,
               let folders = appFolders.state.assignments,
-              let notifications = notifications.state.rules
+              let notifications = notifications.state.rules,
+              let visits = visits.state.visits
         else { return nil }
-        return SyncedState(rules: rules, folders: folders, notifications: notifications)
+        return SyncedState(rules: rules, folders: folders, notifications: notifications, visits: visits)
     }
 
     /// The app is in front again. Another device may have changed things meanwhile,
@@ -594,6 +646,7 @@ final class Workspace {
         }
         if let folders = state.folders { appFolders.send(.remoteArrived(folders)) }
         if let asked = state.notifications { notifications.send(.remoteArrived(asked)) }
+        if let remoteVisits = state.visits { visits.send(.remoteArrived(remoteVisits)) }
     }
 
     // MARK: Notifications
@@ -633,13 +686,17 @@ final class Workspace {
 
     /// Why the Screener's decisions or the folder choices could not be stored.
     var storageProblem: String? {
-        rules.state.storageProblem ?? appFolders.state.storageProblem ?? notifications.state.storageProblem
+        rules.state.storageProblem
+            ?? appFolders.state.storageProblem
+            ?? notifications.state.storageProblem
+            ?? visits.state.storageProblem
     }
 
     func dismissStorageProblem() {
         rules.send(.storageProblemDismissed)
         appFolders.send(.storageProblemDismissed)
         notifications.send(.storageProblemDismissed)
+        visits.send(.storageProblemDismissed)
     }
 }
 

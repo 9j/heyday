@@ -17,6 +17,14 @@ public enum Listing: Hashable, Sendable {
 /// What the window's three columns are showing: the list chosen in the sidebar, a
 /// search laid over it, and the conversations picked in the list.
 public struct NavigationFeature: Feature {
+    /// The previous-visit watermark captured when opening Paper Trail or The Feed.
+    /// Held steady for the whole visit so the "New Since You Last Visited" divider
+    /// never jumps while the person is reading.
+    public enum VisitCutoff: Equatable, Sendable {
+        case pending
+        case captured(Date?)
+    }
+
     public struct State: Equatable, Sendable {
         public fileprivate(set) var listing: Listing = .box(.mebox)
         /// The search on screen. It covers `listing` until it is dismissed.
@@ -26,6 +34,8 @@ public struct NavigationFeature: Feature {
         /// under "New for You" until you leave, so a row does not jump away from
         /// under the pointer the moment it is read.
         public fileprivate(set) var readThisVisit: Set<Conversation.ID> = []
+        /// The previous-visit timestamp captured when this listing opened.
+        public fileprivate(set) var visitCutoff: VisitCutoff = .pending
 
         public init() {}
     }
@@ -37,6 +47,9 @@ public struct NavigationFeature: Feature {
         case selectionChanged(Set<Conversation.ID>)
         /// A conversation was opened and so marked seen.
         case conversationRead(Conversation.ID)
+        /// The previous visit timestamp for the current box was read. Ignored once
+        /// already captured for this visit.
+        case visitCutoffCaptured(Date?)
         /// Something the person did took conversations out of the list on screen.
         /// Both lists are in the order shown.
         case conversationsLeft(listBefore: [Conversation.ID], listAfter: [Conversation.ID])
@@ -70,6 +83,11 @@ public struct NavigationFeature: Feature {
 
         case .conversationRead(let id):
             state.readThisVisit.insert(id)
+
+        case .visitCutoffCaptured(let date):
+            if state.visitCutoff == .pending {
+                state.visitCutoff = .captured(date)
+            }
 
         case .conversationsLeft(let before, let after):
             let remaining = Set(after)
@@ -109,6 +127,41 @@ public struct MeboxSections: Equatable, Sendable {
 
     /// Every conversation, in the order the two parts are shown.
     public var all: [Conversation] { new + seen }
+}
+
+/// Paper Trail and The Feed's two parts: what arrived after the previous visit, and
+/// what was already there then.
+public struct VisitedBoxSections: Equatable, Sendable {
+    public let new: [Conversation]
+    public let earlier: [Conversation]
+
+    /// - Parameter lastVisited: when the box was last visited before this visit.
+    ///   Nil on the first visit ever, when nothing is separated as new yet.
+    public init(_ conversations: [Conversation], lastVisited: Date?) {
+        guard let cutoff = lastVisited?.toTheSecond else {
+            new = []
+            earlier = conversations
+            return
+        }
+        new = conversations.filter { Self.arrival(of: $0).map { $0.toTheSecond > cutoff } ?? false }
+        earlier = conversations.filter { Self.arrival(of: $0).map { $0.toTheSecond <= cutoff } ?? true }
+    }
+
+    /// Every conversation, in the order the two parts are shown.
+    public var all: [Conversation] { new + earlier }
+
+    /// When a conversation's newest mail arrived on the server (falling back to the
+    /// Date header when a server did not supply `INTERNALDATE`).
+    public static func arrival(of conversation: Conversation) -> Date? {
+        conversation.latest.received ?? conversation.latest.date
+    }
+
+    /// The watermark to record for a visit: at least `now`, and at least the newest
+    /// arrival already on screen so slight clock skew never marks it new again.
+    public static func watermark(for conversations: [Conversation], now: Date) -> Date {
+        let newest = conversations.compactMap(arrival(of:)).max()
+        return newest.map { max(now, $0) } ?? now
+    }
 }
 
 /// How a conversation's time is written in a list, the way Mail does: the clock time

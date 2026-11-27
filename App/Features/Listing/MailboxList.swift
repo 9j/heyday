@@ -7,15 +7,58 @@ struct MailboxList: View {
     let listing: Listing
     let workspace: Workspace
 
+    @Environment(\.horizontalSizeClass) private var widthClass
+
     private var store: Store<MailboxFeature> { workspace.mailbox(workspace.mailboxPath(for: listing)) }
     private var presentation: ListingPresentation { ListingPresentation(listing, directory: workspace.directory) }
 
-    /// Lists drawn from the inbox need the Screener's decisions before they can sort it.
+    /// Lists drawn from the inbox need the Screener's decisions (and saved visit
+    /// watermarks for Paper Trail and The Feed) before sorting it.
     private var isWaitingForRules: Bool {
         switch listing {
-        case .box, .screener, .screenedOut: workspace.rules.state.rules == nil
-        case .appFolder, .mailbox: false
+        case .box(.feed), .box(.paperTrail):
+            workspace.rules.state.rules == nil || workspace.visits.state.visits == nil
+        case .box(.mebox), .screener, .screenedOut:
+            workspace.rules.state.rules == nil
+        case .appFolder, .mailbox:
+            false
         }
+    }
+
+    /// Whether this column itself renders the full newsfeed cards for The Feed.
+    /// On macOS the detail column collapses to give this column the full width; on
+    /// iPhone it is the sole column; on iPad regular width the detail column hosts
+    /// the wide feed stream instead.
+    private var showsFeedCardsHere: Bool {
+        guard listing == .box(.feed) else { return false }
+        #if os(macOS)
+        return true
+        #else
+        return widthClass == .compact
+        #endif
+    }
+
+    private var visitedDestination: Destination? {
+        switch listing {
+        case .box(.feed): .feed
+        case .box(.paperTrail): .paperTrail
+        default: nil
+        }
+    }
+
+    /// Re-runs visit recording once saved visits, rules and inbox have loaded, and
+    /// again if newer mail arrives while the box stays open.
+    private var visitTrackingKey: VisitTrackingKey {
+        let newestID = visitedDestination.flatMap { workspace.conversations(for: .box($0)).first?.latest.id }
+        return VisitTrackingKey(
+            destination: visitedDestination,
+            isReady: visitedDestination != nil && !isWaitingForRules && isLoaded,
+            newestMessageID: newestID
+        )
+    }
+
+    private var isLoaded: Bool {
+        if case .loaded = store.state.content { true } else { false }
     }
 
     var body: some View {
@@ -25,6 +68,11 @@ struct MailboxList: View {
             .task {
                 if workspace.hasMailbox(for: listing) {
                     store.send(.refreshRequested)
+                }
+            }
+            .task(id: visitTrackingKey) {
+                if let destination = visitTrackingKey.destination, visitTrackingKey.isReady {
+                    workspace.noteVisited(destination)
                 }
             }
             .alert(
@@ -67,11 +115,14 @@ struct MailboxList: View {
             } else if listing == .screener {
                 ScreenerList(workspace: workspace) { pagingRow(loaded, older) }
                     .refreshable { await workspace.refresh(listing) }
+            } else if showsFeedCardsHere {
+                FeedView(workspace: workspace) { pagingRow(loaded, older) }
             } else {
                 ConversationList(
                     sections: sections,
                     workspace: workspace,
-                    showsRecipient: workspace.mailboxPath(for: listing) == workspace.directory.path(for: .sent)
+                    showsRecipient: workspace.mailboxPath(for: listing) == workspace.directory.path(for: .sent),
+                    showsUnreadIndicator: showsUnreadIndicator
                 ) {
                     pagingRow(loaded, older)
                 }
@@ -80,14 +131,38 @@ struct MailboxList: View {
         }
     }
 
-    private var sections: [ConversationSection] {
-        guard listing == .box(.mebox) else {
-            return [.init(title: nil, conversations: workspace.conversations(for: listing))]
+    private var showsUnreadIndicator: Bool {
+        switch listing {
+        case .box(.feed), .box(.paperTrail), .screenedOut: false
+        case .box(.mebox), .screener, .appFolder, .mailbox: true
         }
-        let mebox = workspace.meboxSections
+    }
+
+    private var sections: [ConversationSection] {
+        switch listing {
+        case .box(.mebox):
+            let mebox = workspace.meboxSections
+            return [
+                .init(title: "New for You", conversations: mebox.new, emptyNote: "You’re all caught up."),
+                .init(title: "Previously Seen", conversations: mebox.seen),
+            ]
+        case .box(.paperTrail):
+            return visitedSections(for: .paperTrail)
+        case .box(.feed):
+            return visitedSections(for: .feed)
+        default:
+            return [.init(conversations: workspace.conversations(for: listing))]
+        }
+    }
+
+    private func visitedSections(for destination: Destination) -> [ConversationSection] {
+        let split = workspace.visitedBoxSections(for: destination)
+        guard !split.new.isEmpty else {
+            return [.init(conversations: split.earlier)]
+        }
         return [
-            .init(title: "New for You", conversations: mebox.new, emptyNote: "You’re all caught up."),
-            .init(title: "Previously Seen", conversations: mebox.seen),
+            .init(conversations: split.new),
+            .init(header: .newSinceLastVisited, conversations: split.earlier, showsHeaderWhenEmpty: true),
         ]
     }
 
@@ -144,6 +219,14 @@ struct MailboxList: View {
             store.send(.moreRequested)
         }
     }
+}
+
+/// Identifies when a visited box (Paper Trail or The Feed) is ready to record its
+/// visit watermark, and when a newer message arrives while it remains open.
+private struct VisitTrackingKey: Equatable {
+    let destination: Destination?
+    let isReady: Bool
+    let newestMessageID: MessageSummary.ID?
 }
 
 /// The last row of a list that has more on the server.

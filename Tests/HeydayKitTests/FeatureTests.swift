@@ -82,6 +82,23 @@ private func page(_ uids: [UInt32], hasMore: Bool = false) -> SummaryPage {
 
         #expect(state.selection == ["a"])
     }
+
+    @Test func visitCutoffIsCapturedOncePerVisitAndClearedOnLeaving() {
+        var state = NavigationFeature.State()
+        let first = Date(timeIntervalSince1970: 1_700_000_000)
+        let later = Date(timeIntervalSince1970: 1_700_000_600)
+
+        #expect(state.visitCutoff == .pending)
+        _ = feature.reduce(&state, .visitCutoffCaptured(first))
+        #expect(state.visitCutoff == .captured(first))
+
+        // A later update during the same visit must not move the divider.
+        _ = feature.reduce(&state, .visitCutoffCaptured(later))
+        #expect(state.visitCutoff == .captured(first))
+
+        _ = feature.reduce(&state, .listingChosen(.box(.paperTrail)))
+        #expect(state.visitCutoff == .pending)
+    }
 }
 
 @Suite struct MeboxSectionsTests {
@@ -99,6 +116,54 @@ private func page(_ uids: [UInt32], hasMore: Bool = false) -> SummaryPage {
         #expect(sections.new == [unread, justRead])
         #expect(sections.seen == [old])
         #expect(sections.all == [unread, justRead, old])
+    }
+}
+
+@Suite struct VisitedBoxSectionsTests {
+    private let cutoff = Date(timeIntervalSince1970: 1_700_000_000)
+
+    private func conversation(_ uid: UInt32, receivedOffset: TimeInterval) -> Conversation {
+        let summary = MessageSummary(
+            id: .init(mailbox: "INBOX", uid: uid),
+            from: EmailAddress(address: "a\(uid)@example.com"),
+            subject: "S\(uid)",
+            received: cutoff.addingTimeInterval(receivedOffset),
+            isSeen: true
+        )
+        return Conversation.group([summary])[0]
+    }
+
+    @Test func firstVisitHasNoNewSectionYet() {
+        let recent = conversation(2, receivedOffset: 60)
+        let older = conversation(1, receivedOffset: -60)
+
+        let sections = VisitedBoxSections([recent, older], lastVisited: nil)
+
+        #expect(sections.new.isEmpty)
+        #expect(sections.earlier == [recent, older])
+    }
+
+    @Test func subsequentVisitSplitsStrictlyAfterTheSavedSecond() {
+        let fresh = conversation(3, receivedOffset: 10)
+        // Same second as the cutoff (even with fractional seconds) was already seen.
+        let sameSecond = conversation(2, receivedOffset: 0.4)
+        let older = conversation(1, receivedOffset: -120)
+
+        let sections = VisitedBoxSections([fresh, sameSecond, older], lastVisited: cutoff)
+
+        #expect(sections.new == [fresh])
+        #expect(sections.earlier == [sameSecond, older])
+        #expect(sections.all == [fresh, sameSecond, older])
+    }
+
+    @Test func watermarkAdvancesPastServerClockSkew() {
+        let aheadOfClock = conversation(2, receivedOffset: 45)
+        let now = cutoff.addingTimeInterval(10)
+
+        let watermark = VisitedBoxSections.watermark(for: [aheadOfClock], now: now)
+
+        #expect(watermark == aheadOfClock.latest.received)
+        #expect(VisitedBoxSections([aheadOfClock], lastVisited: watermark).new.isEmpty)
     }
 }
 

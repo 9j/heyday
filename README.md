@@ -95,8 +95,8 @@ IMAP has folders and flags, and nothing else. The rest is this app's doing:
 | HEY | Here |
 | --- | --- |
 | The Screener | A decision per sender, kept on this Mac in `~/Library/Application Support/Heyday` and, for your other devices, in the account (see [The same on every device](#the-same-on-every-device)). An undecided sender's mail stays in your inbox on the server; the app holds it in the Screener until you say yes or no. |
-| Imbox, The Feed, Paper Trail | **Mebox**, **The Feed**, and **Paper Trail** — three views of the server's inbox, split by where each sender is delivered. Nothing is moved on the server. |
-| Screened Out | A fourth view of the inbox: mail from senders you said no to. It is marked read on the server, when you say no and as more arrives, so other mail programs do not count it as new; Undo makes what your answer marked read unread again. |
+| Imbox, The Feed, Paper Trail | **Mebox**, **The Feed**, and **Paper Trail** — three views of the server's inbox, split by where each sender is delivered. Nothing is moved on the server. **The Feed** renders newsletters as an open newsfeed of cards with inline *See more…* expansion; **Paper Trail** (and The Feed) mark mail read on the server automatically and draw a *New Since You Last Visited* divider using a synced visit watermark. |
+| Screened Out | A fourth view of the inbox: mail from senders you said no to. Like The Feed and Paper Trail, it is marked read on the server when assigned and as more arrives, so other mail programs do not count it as new; Undo makes what your answer marked read unread again. |
 | Reply Later, Set Aside | Real mailboxes on the server, so other mail clients see them too. The app makes a folder for each the first time you use it. |
 | Seen and unseen | The IMAP `\Seen` flag. |
 | Notifications | Off unless you ask, as in HEY: mail is announced only from a sender, or in a conversation, that you turned notifications on for. |
@@ -114,7 +114,7 @@ screening out the sender of an old email takes their old mail out of Mebox too.
 Settings lists every decision and lets you change it.
 
 Another mail program does not know the Screener's decisions: to it, all of this is
-one inbox, in which screened-out mail is already read. Heyday on another device does.
+one inbox, in which The Feed, Paper Trail, and screened-out mail are already read. Heyday on another device does.
 
 Mail arrives quietly. A conversation's menu (and the Message menu) has two switches:
 Notify Me About This Conversation, and Notify Me When its sender Writes. New mail is
